@@ -1,3 +1,231 @@
 # Getting Started
 
-This section helps you get started with AlphaAvatar.
+AlphaAvatar is a self-hostable Omni-Avatar personal assistant framework designed to build persistent, personalized, and tool-using AI assistants.
+
+This guide helps you quickly understand how to install AlphaAvatar, configure the runtime environment, and start your first Agent.
+
+---
+
+## What You Will Set Up
+
+In this guide, you will:
+
+- Install AlphaAvatar from source
+- Configure environment variables
+- Download required runtime files
+- Start an AlphaAvatar Agent locally or on a server
+- Connect to the Agent through LiveKit Playground or the AlphaAvatar Web Demo
+
+---
+
+## Prerequisites
+
+Before starting, make sure you have:
+
+- Python 3.11
+- `uv`
+- A LiveKit Cloud project or self-hosted LiveKit server
+- An OpenAI-compatible API key
+- Git
+
+Install `uv` if it is not already available:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"
+uv --version
+```
+
+---
+
+## 1. Clone AlphaAvatar
+
+Clone the repository with submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/AlphaAvatar/AlphaAvatar.git
+cd AlphaAvatar
+```
+
+If you already cloned the repository without submodules, run:
+
+```bash
+git submodule update --init --recursive
+```
+
+---
+
+## 2. Create Python Environment
+
+Create a Python 3.11 virtual environment:
+
+```bash
+uv venv .venv --python 3.11
+source .venv/bin/activate
+```
+
+Install all packages:
+
+```bash
+uv sync --all-packages
+```
+
+---
+
+## 3. Configure Environment Variables
+
+Create an environment file:
+
+```bash
+cp .env.template .env.dev
+```
+
+Edit the file:
+
+```bash
+nano .env.dev
+```
+
+At minimum, configure the following variables:
+
+```env
+# LiveKit
+LIVEKIT_URL=
+LIVEKIT_API_KEY=
+LIVEKIT_API_SECRET=
+
+# OpenAI
+OPENAI_API_KEY=
+
+# Optional: OpenAI-compatible custom endpoint
+OPENAI_BASE_URL=
+
+# AlphaAvatar workspace
+AVATAR_WORK_DIR=.alphaavatar_workspace
+```
+
+`AVATAR_WORK_DIR` is used to store user-scoped runtime data, including memory, persona state, RAG indexes, tool artifacts, and local vector databases.
+
+---
+
+## 4. Download Required Files
+
+Some plugins may require local model files or runtime assets.
+
+Run:
+
+```bash
+alphaavatar download-files
+```
+
+---
+
+## 5. Start Your First Agent
+
+Start AlphaAvatar in development mode:
+
+```bash
+ENV_FILE=.env.dev alphaavatar dev examples/agent_configs/pipeline_openai_tools.yaml
+```
+
+Or start the AIRI Live2D character demo:
+
+```bash
+ENV_FILE=.env.dev alphaavatar dev examples/agent_configs/pipeline_openai_airi.yaml
+```
+
+For a production-style server process, use:
+
+```bash
+ENV_FILE=.env.dev alphaavatar start examples/agent_configs/pipeline_openai_tools.yaml
+```
+
+---
+
+## 6. Connect Through LiveKit Playground
+
+After the Agent starts successfully, open the LiveKit Agents Playground:
+
+```text
+https://agents-playground.livekit.io/
+```
+
+Then:
+
+1. Connect to your LiveKit project.
+2. Set the Agent name to match `avatar_name` in your config file.
+3. Join a room.
+4. Start interacting with AlphaAvatar using voice or text.
+
+The default Agent name is usually:
+
+```yaml
+avatar_name: "Assistant"
+```
+
+If you changed it in the YAML config, make sure the Playground uses the same name.
+
+---
+
+## 7. Try the Web Demo
+
+AlphaAvatar also supports a browser-based realtime Web Demo.
+
+The Web Demo connects to the same LiveKit project as your running AlphaAvatar Agent.
+
+Make sure the frontend environment variable matches the Agent config:
+
+```env
+NEXT_PUBLIC_AVATAR_NAME=AlphaAvatar
+```
+
+And make sure this value matches:
+
+```yaml
+avatar_name: "AlphaAvatar"
+```
+
+If the names do not match, the frontend may connect to LiveKit successfully but continue waiting for the Agent.
+
+---
+
+## Common Startup Commands
+
+Run with tools:
+
+```bash
+ENV_FILE=.env.dev alphaavatar dev examples/agent_configs/pipeline_openai_tools.yaml
+```
+
+Run with AIRI character:
+
+```bash
+ENV_FILE=.env.dev alphaavatar dev examples/agent_configs/pipeline_openai_airi.yaml
+```
+
+Run production mode:
+
+```bash
+ENV_FILE=.env.dev alphaavatar start examples/agent_configs/pipeline_openai_tools.yaml
+```
+
+Download required files:
+
+```bash
+alphaavatar download-files
+```
+
+---
+
+## Next Steps
+
+After your first Agent is running, you can continue with:
+
+* Configuring Memory
+* Configuring Persona
+* Using RAG for document retrieval
+* Connecting MCP tools
+* Deploying AlphaAvatar with systemd
+* Connecting external channels such as WhatsApp
+
+AlphaAvatar is designed to be modular. You can start with a minimal voice Agent and gradually add memory, persona, tools, RAG, MCP, and virtual character capabilities.
