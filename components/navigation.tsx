@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { strings } from '@/lib/i18n'
 
 // `lang` is the document's language when it differs from the one being read.
@@ -10,9 +10,11 @@ export type TocEntry = { depth: number; id: string; text: string }
 
 const MENU = 'docs:menu'
 
-// Groups expand and collapse in place; the current page's group always starts open.
+// Groups expand and collapse in place; the current page's group always starts open. The rail and
+// the drawer each render one, so list ids carry the instance's own React id.
 export function NavTree({ groups, current, locale }: { groups: NavGroupData[]; current: string; locale: string }) {
   const t = strings(locale)
+  const instance = useId()
   const [open, setOpen] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(groups.map((g) => [g.id, g.items.length <= 6 || g.index?.key === current || g.items.some((i) => i.key === current)])),
   )
@@ -25,13 +27,13 @@ export function NavTree({ groups, current, locale }: { groups: NavGroupData[]; c
             type="button"
             className="nav-group-head"
             aria-expanded={open[g.id]}
-            aria-controls={`nav-${g.id}`}
+            aria-controls={`${instance}nav-${g.id}`}
             onClick={() => setOpen((o) => ({ ...o, [g.id]: !o[g.id] }))}
           >
             {g.title}
             <img src="/icons/chevron.svg" width={16} height={16} alt="" />
           </button>
-          <ul id={`nav-${g.id}`} className="nav-list" hidden={!open[g.id]}>
+          <ul id={`${instance}nav-${g.id}`} className="nav-list" hidden={!open[g.id]}>
             {[...(g.index ? [{ ...g.index, title: t.sectionOverview }] : []), ...g.items].map((item) => (
               <li key={item.key}>
                 <a className="nav-item" href={item.href} aria-current={item.key === current ? 'page' : undefined}>

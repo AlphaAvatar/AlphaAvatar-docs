@@ -70,19 +70,18 @@ function buildPages(manifest: Manifest, locale: string): Page[] {
   return [...docs, ...indexes]
 }
 
+export function loadVersion(source: Snapshot): Version {
+  const manifest = loadManifest(source.root)
+  const langs = new Set(manifest.documents.filter((d) => d.visibility === 'public').map((d) => d.lang))
+  const locales = [...Object.keys(site.locales).filter((l) => langs.has(l)), ...[...langs].filter((l) => !(l in site.locales))]
+  const docs = new Map(manifest.documents.filter((d) => d.visibility === 'public').map((d) => [d.path, d]))
+  const pages = new Map(locales.map((locale) => [locale, buildPages(manifest, locale)]))
+  return { id: source.id, label: source.label, source, manifest, locales, docs, pages }
+}
+
 let cache: Version[] | undefined
 
-export function versions(): Version[] {
-  cache ??= snapshots().map((source) => {
-    const manifest = loadManifest(source.root)
-    const langs = new Set(manifest.documents.filter((d) => d.visibility === 'public').map((d) => d.lang))
-    const locales = [...Object.keys(site.locales).filter((l) => langs.has(l)), ...[...langs].filter((l) => !(l in site.locales))]
-    const docs = new Map(manifest.documents.filter((d) => d.visibility === 'public').map((d) => [d.path, d]))
-    const pages = new Map(locales.map((locale) => [locale, buildPages(manifest, locale)]))
-    return { id: source.id, label: source.label, source, manifest, locales, docs, pages }
-  })
-  return cache
-}
+export const versions = (): Version[] => (cache ??= snapshots().map(loadVersion))
 
 export const version = (id: string) => versions().find((v) => v.id === id)
 

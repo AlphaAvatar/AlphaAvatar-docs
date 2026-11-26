@@ -9,7 +9,8 @@
     "dev": "pnpm sources && pnpm generate && next dev",
     "build": "pnpm sources && pnpm generate && next build",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "geist": "^1.9.2",

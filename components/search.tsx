@@ -6,12 +6,12 @@ import { strings } from '@/lib/i18n'
 // The search overlay: opened from the header or Cmd/Ctrl+K, it searches the index of the
 // version and language being read and keeps its query between openings.
 
-type SearchRecord = { href: string; title: string; heading: string; section: string; lang: string; path: string; text: string }
-type Indexed = SearchRecord & { haystack: [string, string, string] }
+export type SearchRecord = { href: string; title: string; heading: string; section: string; lang: string; path: string; text: string }
+export type Indexed = SearchRecord & { haystack: [string, string, string] }
 
 const OPEN = 'docs:search'
 
-function rank(records: Indexed[], query: string): Indexed[] {
+export function rank(records: Indexed[], query: string): Indexed[] {
   const phrase = query.trim().toLowerCase()
   const terms = phrase.split(/\s+/).filter(Boolean)
   if (!terms.length) return []
@@ -33,11 +33,12 @@ function rank(records: Indexed[], query: string): Indexed[] {
   return scored.sort((a, b) => b[1] - a[1]).slice(0, 30).map(([r]) => r)
 }
 
-function snippet(text: string, query: string): ReactNode[] {
+// The text around the first matching term; from the start when only the title or heading matched.
+export function snippet(text: string, query: string): ReactNode[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const lower = text.toLowerCase()
-  const at = Math.max(0, Math.min(...terms.map((t) => lower.indexOf(t)).filter((i) => i >= 0)))
-  const start = Math.max(0, at - 60)
+  const found = terms.map((t) => lower.indexOf(t)).filter((i) => i >= 0)
+  const start = found.length ? Math.max(0, Math.min(...found) - 60) : 0
   const part = (start ? '…' : '') + text.slice(start, start + 200)
   const pattern = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi')
   return part.split(pattern).map((piece, i) => (i % 2 ? <mark key={i}>{piece}</mark> : piece))

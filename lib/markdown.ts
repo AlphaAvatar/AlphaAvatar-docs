@@ -87,6 +87,14 @@ function resolve(v: Version, from: string, url: string): Target {
   }
 }
 
+// A link to another language of a document that also exists in the linking document's own
+// language names that language on purpose (a language switch, a translation listed by name), so
+// it keeps it. Any other link to a document follows the language being read.
+function namesLanguage(v: Version, from: Doc, to: Doc): boolean {
+  const group = to.translation_group
+  return !!group && to.lang !== from.lang && [...v.docs.values()].some((d) => d.translation_group === group && d.lang === from.lang)
+}
+
 function plain(node: Nodes): string {
   if (node.type === 'html') return node.value.replace(/<[^>]+>/g, ' ')
   if ('value' in node) return node.value
@@ -120,12 +128,16 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
       return undefined
     }
     if (target.kind === 'doc') {
-      if (target.fragment) links.push({ doc: target.doc, fragment: target.fragment.slice(1) })
-      const key = target.doc.translation_group ?? target.doc.id
+      const { doc: to, fragment } = target
+      if (fragment) links.push({ doc: to, fragment: fragment.slice(1) })
+      const key = to.translation_group ?? to.id
+      if (namesLanguage(v, doc, to)) {
+        return { html: pageHref(v.id, to.lang, pageByKey(v, to.lang, key)!.route) + fragment, md: site.url + markdownHref(v.id, to) + fragment }
+      }
       const read = pageByKey(v, locale, key)!
       const own = pageByKey(v, doc.lang, key)!
       if (own.kind !== 'doc') return undefined
-      return { html: pageHref(v.id, locale, read.route) + target.fragment, md: site.url + markdownHref(v.id, own.doc) + target.fragment }
+      return { html: pageHref(v.id, locale, read.route) + fragment, md: site.url + markdownHref(v.id, own.doc) + fragment }
     }
     if (display || (IMAGE.test(target.file) && !target.directory)) {
       assets.add(target.file)
