@@ -1,0 +1,107 @@
+// Write the outputs that sit beside the HTML pages, from the snapshots `pnpm sources` pinned:
+// each document's Markdown (or HTML) source with links rewritten, the displayed repository
+// assets, search indexes, llms.txt files and the sitemap. Nothing is written when a link or
+// anchor does not resolve.
+
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { site } from '../site.config'
+import { htmlSections, renderDocument } from '../lib/markdown'
+import { allLocales, assetHref, llmsHref, markdownHref, nav, pageHref, searchHref, versions } from '../lib/site'
+
+const PUBLIC = path.join(process.cwd(), 'public')
+const files = new Map<string, string | { copy: string }>()
+const problems: string[] = []
+
+const out = (href: string, body: string | { copy: string }) => files.set(path.join(PUBLIC, href), body)
+
+for (const v of versions()) {
+  const sha = v.source.sha
+
+  for (const doc of v.docs.values()) {
+    if (doc.format === 'html') {
+      out(markdownHref(v.id, doc), { copy: path.join(v.source.root, doc.path) })
+      continue
+    }
+    const rendered = renderDocument(v, doc, doc.lang)
+    problems.push(...rendered.problems)
+    for (const link of rendered.links) {
+      if (link.doc.format !== 'html' && !renderDocument(v, link.doc, link.doc.lang).anchors.includes(link.fragment)) {
+        problems.push(`${doc.path}: #${link.fragment} is not an anchor of ${link.doc.path}`)
+      }
+    }
+    out(markdownHref(v.id, doc), rendered.markdown)
+    for (const asset of rendered.assets) out(assetHref(sha, asset), { copy: path.join(v.source.root, asset) })
+  }
+
+  for (const locale of v.locales) {
+    const groups = nav(v, locale)
+    const records = groups.flatMap((g) =>
+      g.pages.flatMap((page) => {
+        const sections = page.doc.format === 'html' ? htmlSections(v, page.doc) : renderDocument(v, page.doc, locale).sections
+        return sections.map((s) => ({
+          href: pageHref(v.id, locale, page.route) + (s.anchor ? `#${s.anchor}` : ''),
+          title: page.doc.title,
+          heading: s.heading,
+          section: g.section.title,
+          lang: page.doc.lang,
+          path: page.doc.path,
+          text: s.text,
+        }))
+      }),
+    )
+    out(searchHref(v.id, locale), JSON.stringify({ version: v.id, locale, sha, records }))
+
+    const lines = [
+      `# ${site.name} · ${v.label} · ${site.locales[locale] ?? locale}`,
+      '',
+      `> ${site.repository} at ${v.source.ref} ${sha}. Each link is the Markdown source of one page; ` +
+        'a page without a version in this language links its original language.',
+      '',
+      ...groups.flatMap((g) => [
+        `## ${g.section.title}`,
+        '',
+        ...g.pages.map((p) => `- [${p.doc.title}](${site.url}${markdownHref(v.id, p.doc)}): ${p.doc.path}${p.doc.lang === locale ? '' : ` (${p.doc.lang})`}`),
+        '',
+      ]),
+    ]
+    out(llmsHref(v.id, locale), lines.join('\n'))
+  }
+}
+
+out(
+  'llms.txt',
+  [
+    `# ${site.name}`,
+    '',
+    `> Documentation of ${site.repository}, generated from its repository. One index per version and language:`,
+    '',
+    ...versions().flatMap((v) => v.locales.map((l) => `- [${v.label} · ${site.locales[l] ?? l}](${site.url}${llmsHref(v.id, l)}): ${v.source.ref} ${v.source.sha}`)),
+    '',
+  ].join('\n'),
+)
+
+out(
+  'sitemap.xml',
+  [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
+    ...versions().flatMap((v) => v.locales.flatMap((l) => (v.pages.get(l) ?? []).map((p) => `  <url><loc>${site.url}${pageHref(v.id, l, p.route)}</loc></url>`))),
+    '</urlset>',
+    '',
+  ].join('\n'),
+)
+
+if (problems.length) {
+  for (const p of [...new Set(problems)]) console.error(`generate: ${p}`)
+  process.exit(1)
+}
+
+// Generated roots only; public/brand and public/icons belong to the site.
+for (const root of [...allLocales(), '_assets', 'llms.txt', 'sitemap.xml']) rmSync(path.join(PUBLIC, root), { recursive: true, force: true })
+for (const [file, body] of files) {
+  mkdirSync(path.dirname(file), { recursive: true })
+  if (typeof body === 'string') writeFileSync(file, body)
+  else copyFileSync(body.copy, file)
+}
+console.log(`generate: ${files.size} files for ${versions().map((v) => `${v.id}@${v.source.sha.slice(0, 12)}`).join(', ')}`)
