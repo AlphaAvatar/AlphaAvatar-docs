@@ -7,8 +7,9 @@ export type VersionSource = {
   label: string
   // Branch or tag in the source repository; resolved to one commit per build.
   ref: string
-  // The branch still being written: "Edit source" links go to it.
-  development?: boolean
+  // The branch where this version's text is edited: "Edit source" opens the page's file there,
+  // while "View source" stays at the commit the build used. Without one, no edit link is shown.
+  editRef?: string
 }
 
 export const site = {
@@ -18,9 +19,7 @@ export const site = {
   // One entry per documentation version, newest first; `/` leads to the first. A new version is
   // a new entry here (for example its release tag), not a new branch of this site. A ref can be
   // listed only once its snapshot holds docs/manifest.yaml (v0.6.9 and earlier do not).
-  versions: [{ id: 'v0.7.0', label: 'v0.7.0', ref: 'dev/v0.7.0', development: true }] as VersionSource[],
-  // Manifest sections linked from the header.
-  header: ['get-started', 'development', 'reference'],
+  versions: [{ id: 'v0.7.0', label: 'v0.7.0', ref: 'dev/v0.7.0', editRef: 'dev/v0.7.0' }] as VersionSource[],
   locales: { en: 'English', 'zh-CN': '简体中文' } as Record<string, string>,
   defaultLocale: 'en',
 }

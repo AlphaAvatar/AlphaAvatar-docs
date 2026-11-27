@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { site } from '@/site.config'
-import { DocArticle, SectionIndex } from '@/components/article'
+import { DocArticle, ReleasesIndex, SectionIndex } from '@/components/article'
 import { Home } from '@/components/home'
 import { RoadmapArticle } from '@/components/roadmap'
 import { Shell } from '@/components/shell'
@@ -30,7 +30,9 @@ function resolve({ locale, version: id, slug }: Params) {
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { v, page } = resolve(await params)
   const title =
-    page.kind === 'home' ? site.name : `${page.kind === 'doc' ? page.doc.title : sectionTitle(page.section, page.locale)} · ${site.name}`
+    page.kind === 'home'
+      ? site.name
+      : `${page.kind === 'doc' ? page.doc.title : sectionTitle(page.kind === 'releases' ? page.group : page.section, page.locale)} · ${site.name}`
   const markdown = page.kind === 'home' ? homeMarkdownHref(v.id, page.locale) : page.kind === 'doc' && page.doc.format !== 'html' ? markdownHref(v.id, page.doc) : undefined
   const languages = Object.fromEntries(v.locales.map((l) => [l, pageHref(v.id, l, pageByKey(v, l, page.key)!.route)]))
   return {
@@ -49,6 +51,13 @@ export default async function Page({ params }: { params: Promise<Params> }) {
     return (
       <Shell v={v} page={page} entries={[]}>
         <SectionIndex v={v} page={page} />
+      </Shell>
+    )
+  }
+  if (page.kind === 'releases') {
+    return (
+      <Shell v={v} page={page} entries={[]}>
+        <ReleasesIndex v={v} page={page} />
       </Shell>
     )
   }

@@ -2,25 +2,31 @@ import type { ReactNode } from 'react'
 import { site } from '@/site.config'
 import { strings } from '@/lib/i18n'
 import { sectionTitle } from '@/lib/manifest'
-import { nav, pageByKey, pageHref, searchHref, sectionEntry, versions, type Page, type Version } from '@/lib/site'
+import { nav, pageByKey, pageHref, searchHref, sectionOf, versions, type NavNode, type Page, type Version } from '@/lib/site'
 import { Lockup } from './brand'
 import { LanguageMenu, VersionMenu, type LanguageOption, type VersionOption } from './menus'
-import { ContentsPanel, MenuTrigger, NavDrawer, NavTree, type NavGroupData, type TocEntry } from './navigation'
+import { ContentsPanel, MenuTrigger, NavDrawer, Rail, type NavGroupData, type NavSectionData, type TocEntry } from './navigation'
 import { SearchDialog, SearchTrigger } from './search'
 
 export const localeLabel = (locale: string) => site.locales[locale] ?? locale
 
-function navData(v: Version, locale: string): NavGroupData[] {
-  return nav(v, locale).map((g) => ({
-    id: g.section.id,
-    title: sectionTitle(g.section, locale),
-    index: g.index && { key: g.index.key, title: sectionTitle(g.section, locale), href: pageHref(v.id, locale, g.index.route) },
-    items: g.pages.map((p) => ({
-      key: p.key,
-      title: p.doc.title,
-      href: pageHref(v.id, locale, p.route),
-      ...(p.doc.lang !== locale && { lang: p.doc.lang }),
-    })),
+// Every section's navigation as the client components take it.
+function navSections(v: Version, locale: string): NavSectionData[] {
+  const t = strings(locale)
+  const group = (n: NavNode): NavGroupData => ({
+    id: n.group.id,
+    title: sectionTitle(n.group, locale),
+    items: [
+      ...(n.index ? [{ key: n.index.key, title: t.allReleases, href: pageHref(v.id, locale, n.index.route) }] : []),
+      ...n.pages.map((p) => ({ key: p.key, title: p.doc.title, href: pageHref(v.id, locale, p.route), ...(p.doc.lang !== locale && { lang: p.doc.lang }) })),
+    ],
+    groups: n.groups.map(group),
+  })
+  return nav(v, locale).map((s) => ({
+    id: s.section.id,
+    title: sectionTitle(s.section, locale),
+    href: s.entry && pageHref(v.id, locale, s.entry.route),
+    groups: s.groups.map(group),
   }))
 }
 
@@ -40,11 +46,14 @@ function languageOptions(v: Version, page: Page): LanguageOption[] {
   })
 }
 
-// Header, category rail, drawer and overlays around one page. `wide` drops the rail (home).
-export function Shell({ v, page, entries, wide, children }: { v: Version; page: Page; entries: TocEntry[]; wide?: boolean; children: ReactNode }) {
+// Header, the section's rail, drawer and overlays around one page. `wide` drops the rail (home).
+export function Shell({ v, page, entries, wide, children }: { v: Version; page: Page; entries: TocEntry[]; wide?: boolean; children?: ReactNode }) {
   const { locale } = page
   const t = strings(locale)
-  const groups = navData(v, locale)
+  const sections = navSections(v, locale)
+  const active = sectionOf(page)?.id
+  const current = sections.find((s) => s.id === active)
+  const memory = `${v.id}:${locale}`
   const versionsMenu = (id: string) => <VersionMenu id={id} locale={locale} current={v.id} options={versionOptions(page)} />
   const languagesMenu = (id: string) => <LanguageMenu id={id} locale={locale} options={languageOptions(v, page)} />
   const context = [v.label, localeLabel(locale)]
@@ -53,6 +62,16 @@ export function Shell({ v, page, entries, wide, children }: { v: Version; page: 
       {c}
     </span>
   ))
+  // The four sections; the page's own is current, and so marked on its entry page.
+  const sectionLinks = (className: string) => (
+    <nav className={className} aria-label={t.sections}>
+      {sections.map((s) => (
+        <a key={s.id} href={s.href} aria-current={s.id === active ? (page.kind === 'section' ? 'page' : 'true') : undefined}>
+          {s.title}
+        </a>
+      ))}
+    </nav>
+  )
 
   return (
     <>
@@ -66,17 +85,7 @@ export function Shell({ v, page, entries, wide, children }: { v: Version; page: 
         </a>
         <SearchTrigger locale={locale} />
         <span className="spacer" />
-        <nav className="header-nav" aria-label={t.menu}>
-          {site.header.map((id) => {
-            const entry = sectionEntry(v, locale, id)
-            const section = v.manifest.sections.find((s) => s.id === id)
-            return entry && section ? (
-              <a key={id} href={pageHref(v.id, locale, entry.route)}>
-                {sectionTitle(section, locale)}
-              </a>
-            ) : null
-          })}
-        </nav>
+        {sectionLinks('header-nav')}
         <div className="context chips">
           {versionsMenu('version-menu')}
           {languagesMenu('language-menu')}
@@ -89,17 +98,18 @@ export function Shell({ v, page, entries, wide, children }: { v: Version; page: 
           {versionsMenu('version-menu-mobile')}
           {languagesMenu('language-menu-mobile')}
         </div>
-        <ContentsPanel entries={entries} locale={locale} chips={chips} />
       </div>
-      <div className={wide ? 'workspace wide' : 'workspace'}>
-        {!wide && (
-          <nav className="rail" aria-label={t.menu}>
-            <NavTree groups={groups} current={page.key} locale={locale} />
-          </nav>
-        )}
+      {sectionLinks('section-tabs only-compact')}
+      {entries.length > 0 && (
+        <div className="mobile-context only-mobile">
+          <ContentsPanel entries={entries} locale={locale} chips={chips} />
+        </div>
+      )}
+      <div className={wide || !current ? 'workspace wide' : 'workspace'}>
+        {!wide && current && <Rail section={current} current={page.key} memory={memory} label={t.menu} />}
         <main id="content">{children}</main>
       </div>
-      <NavDrawer locale={locale} groups={groups} current={page.key} chips={chips} />
+      <NavDrawer locale={locale} sections={sections} section={active} current={page.key} memory={memory} />
       <SearchDialog indexUrl={searchHref(v.id, locale)} locale={locale} context={context} />
     </>
   )

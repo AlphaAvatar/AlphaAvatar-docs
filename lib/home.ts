@@ -1,13 +1,13 @@
 import { site } from '../site.config'
-import { sectionTitle } from './manifest'
-import { latestRelease, markdownHref, pageByKey, pageHref, sectionEntry, type DocPage, type Version } from './site'
+import { places, sectionTitle } from './manifest'
+import { groupEntry, latestRelease, markdownHref, pageByKey, pageHref, sectionEntry, type DocPage, type Version } from './site'
 
 // The home page of one version and language: its HTML (components/home.tsx) and its index.md
 // both come from this model. The short copy is navigation, written here in each interface
-// language; every card leads to a section or document of the snapshot's manifest, and a missing
+// language; every card leads to a section, group or document of the snapshot's manifest, and a missing
 // one fails the build rather than being replaced.
 
-type Target = { section: string } | { doc: string } | { url: string }
+type Target = { section: string } | { group: string } | { doc: string } | { url: string }
 
 export type Icon = 'book' | 'code' | 'route' | 'tag' | 'community'
 
@@ -42,14 +42,14 @@ const copy = {
     title: 'AlphaAvatar documentation',
     lead: 'Install and configure your Host, understand the runtime, and extend AlphaAvatar.',
     actions: [
-      { label: 'Get started', to: { section: 'get-started' }, primary: true },
+      { label: 'Get started', to: { section: 'guide' }, primary: true },
       { label: 'Browse CLI reference', to: { doc: 'cli' } },
     ],
     release: (tag: string) => `Latest release · ${tag}`,
     published: (date: string) => `Published ${date} · UTC`,
     releaseAction: 'Release notes',
     directions: [
-      { to: { section: 'get-started' }, icon: 'book', text: 'Install a Host, choose your configuration and prepare your environment.', action: 'Start with the guides' },
+      { to: { section: 'guide' }, icon: 'book', text: 'Install a Host, choose your configuration and prepare your environment.', action: 'Start with the guides' },
       { to: { section: 'development' }, icon: 'code', text: 'Set up a development environment, follow conventions and contribute to the project.', action: 'Explore development' },
       { to: { section: 'reference' }, icon: 'route', text: 'Understand identifier boundaries and the conventions shared across the system.', action: 'Browse reference' },
     ],
@@ -74,8 +74,8 @@ const copy = {
     resourcesTitle: 'Resources',
     resources: [
       { to: { section: 'reference' }, icon: 'book', title: 'Technical reference', text: 'Identifier and association conventions.' },
-      { to: { section: 'roadmap' }, icon: 'route', title: 'Roadmap', text: 'Version goals, milestones and progress.' },
-      { to: { section: 'releases' }, icon: 'tag', title: 'Releases', text: 'Delivered changes and migration notes.' },
+      { to: { doc: 'roadmap' }, icon: 'route', title: 'Roadmap', text: 'Version goals, milestones and progress.' },
+      { to: { group: 'releases' }, icon: 'tag', title: 'Releases', text: 'Delivered changes and migration notes.' },
       { to: { url: repository }, icon: 'code', title: 'Source code', text: 'Explore the repository and contribute.' },
       { to: { url: `${repository}/discussions` }, icon: 'community', title: 'Community', text: 'Ask questions and share what you build.' },
     ],
@@ -86,14 +86,14 @@ const copy = {
     title: 'AlphaAvatar 文档',
     lead: '安装并配置 Host，理解运行时，扩展 AlphaAvatar。',
     actions: [
-      { label: '开始使用', to: { section: 'get-started' }, primary: true },
+      { label: '开始使用', to: { section: 'guide' }, primary: true },
       { label: '浏览 CLI 参考', to: { doc: 'cli' } },
     ],
     release: (tag: string) => `最新发布 · ${tag}`,
     published: (date: string) => `发布于 ${date} · UTC`,
     releaseAction: '发布说明',
     directions: [
-      { to: { section: 'get-started' }, icon: 'book', text: '安装 Host，选择配置并准备运行环境。', action: '从指南开始' },
+      { to: { section: 'guide' }, icon: 'book', text: '安装 Host，选择配置并准备运行环境。', action: '从指南开始' },
       { to: { section: 'development' }, icon: 'code', text: '搭建开发环境，遵循项目约定并参与贡献。', action: '了解开发' },
       { to: { section: 'reference' }, icon: 'route', text: '理解标识的边界，以及整个系统共享的约定。', action: '浏览参考' },
     ],
@@ -118,8 +118,8 @@ const copy = {
     resourcesTitle: '资源',
     resources: [
       { to: { section: 'reference' }, icon: 'book', title: '技术参考', text: '标识与关联约定。' },
-      { to: { section: 'roadmap' }, icon: 'route', title: '路线图', text: '版本目标、里程碑和进展。' },
-      { to: { section: 'releases' }, icon: 'tag', title: '发布', text: '已交付的变更和迁移说明。' },
+      { to: { doc: 'roadmap' }, icon: 'route', title: '路线图', text: '版本目标、里程碑和进展。' },
+      { to: { group: 'releases' }, icon: 'tag', title: '发布', text: '已交付的变更和迁移说明。' },
       { to: { url: repository }, icon: 'code', title: '源代码', text: '浏览仓库并参与贡献。' },
       { to: { url: `${repository}/discussions` }, icon: 'community', title: '社区', text: '提出问题，分享你的成果。' },
     ],
@@ -142,6 +142,13 @@ export function homeModel(v: Version, locale: string): HomeModel {
       if (!entry || !section) throw new Error(`${where}: section ${to.section} is not published`)
       const href = pageHref(v.id, locale, entry.route)
       return { href, md: entry.kind === 'doc' ? site.url + markdownHref(v.id, entry.doc) : site.url + href, title: sectionTitle(section, locale) }
+    }
+    if ('group' in to) {
+      const entry = groupEntry(v, locale, to.group)
+      const place = places(v.manifest).get(to.group)
+      if (!entry || !place) throw new Error(`${where}: group ${to.group} is not published`)
+      const href = pageHref(v.id, locale, entry.route)
+      return { href, md: entry.kind === 'doc' ? site.url + markdownHref(v.id, entry.doc) : site.url + href, title: sectionTitle(place.groups.at(-1)!, locale) }
     }
     const page = pageByKey(v, locale, to.doc)
     if (page?.kind !== 'doc') throw new Error(`${where}: document ${to.doc} is not published`)

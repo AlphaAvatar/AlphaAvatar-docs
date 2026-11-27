@@ -1,36 +1,37 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { test } from 'node:test'
 import { site } from '../site.config'
 import { homeMarkdown, homeModel } from '../lib/home'
-import { loadVersion, markdownHref, pageOf, type Version } from '../lib/site'
+import { markdownHref, pageOf, type Version } from '../lib/site'
+import { entry, snapshot as write } from './fixture'
 
-// A snapshot holding what the home page points at: identifiers only in Chinese, Doctor only in
-// English, the Roadmap in both.
-function snapshot(without = ''): Version {
-  const sections = ['get-started', 'cli', 'development', 'reference', 'roadmap', 'releases']
-  const root = mkdtempSync(path.join(tmpdir(), 'docs-home-'))
-  const entry = (id: string, file: string, lang: string, route: string, section: string, extra = '') =>
-    `  - {id: ${id}, path: ${file}, title: T-${id}, type: guide, lang: ${lang}, route: ${route}, section: ${section}, order: 1, ` +
-    `visibility: public, status: current, applies_to: snapshot${extra}}`
+// A snapshot holding what the home page points at, in the four sections: identifiers only in
+// Chinese, Doctor only in English, the Roadmap in both, one release.
+function snapshot(...without: string[]): Version {
+  const group = (section: string, groups: string[]) => [
+    `  - id: ${section}`,
+    `    title: {en: S-${section}, zh-CN: 区-${section}}`,
+    `    summary: {en: About ${section}, zh-CN: 关于 ${section}}`,
+    '    groups:',
+    ...groups.map((g) => `      - {id: ${g}, title: {en: G-${g}, zh-CN: 组-${g}}}`),
+  ]
+  const sections = [
+    ...group('guide', ['get-started']),
+    ...group('development', ['contribute']),
+    ...group('reference', ['cli-reference', 'identifiers']),
+    ...group('updates', ['planning', 'releases']),
+  ]
   const docs = [
-    entry('quickstart', 'docs/quickstart.md', 'en', '/get-started/quickstart', 'get-started'),
-    entry('cli', 'docs/cli/README.md', 'en', '/cli', 'cli'),
-    entry('cli-doctor', 'docs/cli/doctor.md', 'en', '/cli/doctor', 'cli'),
-    entry('contributing', 'CONTRIBUTING.md', 'en', '/development/contributing', 'development'),
-    entry('identifiers', 'docs/identifiers-zh.md', 'zh-CN', '/reference/identifiers', 'reference'),
-    entry('roadmap', 'docs/ROADMAP.md', 'en', '/roadmap', 'roadmap', ', translation_group: roadmap'),
-    entry('roadmap-zh', 'docs/ROADMAP-zh.md', 'zh-CN', '/roadmap', 'roadmap', ', translation_group: roadmap'),
-    entry('release-v1', 'docs/releases/v1.md', 'en', '/releases/v1', 'releases', ', release: {tag: v1.0.0, published: 2026-01-02}'),
-  ].filter((d) => !d.includes(`id: ${without},`))
-  const manifest = ['schema: 1', 'repository: test', 'sections:', ...sections.map((s) => `  - {id: ${s}, title: {en: S-${s}, zh-CN: 区-${s}}}`), 'documents:', ...docs, '']
-  mkdirSync(path.join(root, 'docs/cli'), { recursive: true })
-  mkdirSync(path.join(root, 'docs/releases'))
-  writeFileSync(path.join(root, 'docs/manifest.yaml'), manifest.join('\n'))
-  for (const d of docs) writeFileSync(path.join(root, d.match(/path: ([^,]+)/)![1]), '# Title\n')
-  return loadVersion({ id: 't', label: 't', ref: 'main', sha: '0'.repeat(40), committed: '', root })
+    entry('quickstart', 'docs/quickstart.md', 'T-quickstart', 'en', '/get-started/quickstart', '', 'get-started'),
+    entry('cli', 'docs/cli/README.md', 'T-cli', 'en', '/cli', '', 'cli-reference'),
+    entry('cli-doctor', 'docs/cli/doctor.md', 'T-cli-doctor', 'en', '/cli/doctor', '', 'cli-reference', 2),
+    entry('contributing', 'CONTRIBUTING.md', 'T-contributing', 'en', '/development/contributing', '', 'contribute'),
+    entry('identifiers', 'docs/identifiers-zh.md', 'T-identifiers', 'zh-CN', '/reference/identifiers', '', 'identifiers'),
+    entry('roadmap', 'docs/ROADMAP.md', 'T-roadmap', 'en', '/roadmap', ', translation_group: roadmap', 'planning'),
+    entry('roadmap-zh', 'docs/ROADMAP-zh.md', 'T-roadmap-zh', 'zh-CN', '/roadmap', ', translation_group: roadmap', 'planning'),
+    entry('release-v1', 'docs/releases/v1.md', 'T-release-v1', 'en', '/releases/v1', ', release: {tag: v1.0.0, published: 2026-01-02}', 'releases'),
+  ].filter((d) => !without.some((id) => d.includes(`id: ${id},`)))
+  return write(Object.fromEntries(docs.map((d) => [d.match(/path: ([^,]+)/)![1], '# Title\n'])), docs, sections)
 }
 
 test('every home entry is a page of the snapshot, and index.md links the same entries', () => {
@@ -51,7 +52,8 @@ test('every home entry is a page of the snapshot, and index.md links the same en
       assert.ok(markdown.includes(`](${l.md})`), `${locale}: index.md links ${l.md}`)
     }
     assert.equal(m.release!.href, `/${locale}/t/releases/v1/`)
-    assert.equal(m.directions[0].title, locale === 'en' ? 'S-get-started' : '区-get-started')
+    assert.equal(m.directions[0].title, locale === 'en' ? 'S-guide' : '区-guide')
+    assert.equal(m.resources[2].href, `/${locale}/t/releases/`)
   }
 })
 
@@ -65,8 +67,7 @@ test('a featured article names its language only when it is shown in another one
   assert.equal(identifiersZh.original, undefined)
 })
 
-test('a home entry whose section is not published fails instead of being replaced', () => {
-  // The reference section's only document is gone, so the section is not published.
-  const v = snapshot('identifiers')
-  assert.throws(() => homeModel(v, 'en'), /section reference is not published/)
+test('a home entry whose section or document is not published fails instead of being replaced', () => {
+  assert.throws(() => homeModel(snapshot('contributing'), 'en'), /section development is not published/)
+  assert.throws(() => homeModel(snapshot('identifiers'), 'en'), /document identifiers is not published/)
 })

@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { test } from 'node:test'
 import type { Root } from 'mdast'
@@ -13,22 +12,17 @@ import { visit } from 'unist-util-visit'
 import { RoadmapArticle } from '../components/roadmap'
 import { outline } from '../lib/markdown'
 import { roadmapOf, type Milestone } from '../lib/roadmap'
-import { loadVersion, pageOf, versions, type DocPage, type Version } from '../lib/site'
+import { pageOf, versions, type DocPage, type Version } from '../lib/site'
+import { entry, ONE_SECTION, snapshot as write } from './fixture'
 
 // A snapshot holding one Roadmap (docs/ROADMAP.md, route /roadmap) and a guide it links to.
-function snapshot(id: string, roadmap: string): Version {
-  const root = mkdtempSync(path.join(tmpdir(), 'docs-roadmap-'))
-  const entry = (id: string, file: string, type: string, route: string) =>
-    `  - {id: ${id}, path: ${file}, title: ${id}, type: ${type}, lang: en, route: ${route}, section: main, order: 1, visibility: public, status: current, applies_to: snapshot}`
-  mkdirSync(path.join(root, 'docs'))
-  writeFileSync(
-    path.join(root, 'docs/manifest.yaml'),
-    ['schema: 1', 'repository: test', 'sections:', '  - {id: main, title: Main}', 'documents:', entry('roadmap', 'docs/ROADMAP.md', 'roadmap', '/roadmap'), entry('guide', 'docs/guide.md', 'guide', '/guide'), ''].join('\n'),
+const snapshot = (id: string, roadmap: string): Version =>
+  write(
+    { 'docs/guide.md': '# Guide\n', 'docs/ROADMAP.md': roadmap },
+    [entry('roadmap', 'docs/ROADMAP.md', 'roadmap', 'en', '/roadmap'), entry('guide', 'docs/guide.md', 'guide', 'en', '/guide')],
+    ONE_SECTION,
+    id,
   )
-  writeFileSync(path.join(root, 'docs/guide.md'), '# Guide\n')
-  writeFileSync(path.join(root, 'docs/ROADMAP.md'), roadmap)
-  return loadVersion({ id, label: id, ref: 'main', sha: '0'.repeat(40), committed: '', root })
-}
 
 const ITEMS = '| ID | Item | Status | Priority | Date | Notes |\n| --- | --- | --- | --- | --- | --- |'
 const TIMELINE = '| Milestone | Version | Theme | Release | Released | Release notes |\n| --- | --- | --- | --- | --- | --- |'
@@ -56,6 +50,7 @@ ${TIMELINE}
 ### v1.0.0 · Next
 
 - **Release:** in-development
+- **Summary:** One way to *configure*.
 - **Open:** which way.
 
 ${ITEMS}
@@ -93,6 +88,13 @@ ${ITEMS}
 ### Next proposal
 
 Not current behavior.
+
+## Areas
+
+| Code | Area | Scope |
+| --- | --- | --- |
+| \`CFG\` | Configuration | Settings. |
+| \`CORE\` | Core runtime | Contracts. |
 `
 
 const ids = (m: Milestone) => m.areas.flatMap((a) => a.items.map((i) => i.id))
@@ -126,8 +128,30 @@ test('milestones follow the Timeline, items their milestone and area', () => {
   assert.match(JSON.stringify(config.notes), /"href":"\/en\/fixture\/guide\/"/)
   assert.match(JSON.stringify(next.details), /which way/)
 
-  // The headings the timeline replaces give it their ids; the rest of the document stays.
-  assert.deepEqual(r.timeline, { heading: 'Timeline', ids: ['timeline', 'upcoming', 'released', 'long-term'] })
+  // The Timeline section gives the timeline its ids, each milestone section its group of cards,
+  // in document order; the rest of the document stays.
+  assert.deepEqual(r.timeline, { heading: 'Timeline', ids: ['timeline'] })
+  assert.deepEqual(
+    r.groups.map((g) => [g.heading.text, g.ids, g.milestones]),
+    [
+      ['Upcoming', ['upcoming'], ['v1.0.0']],
+      ['Released', ['released'], ['earlier']],
+      ['Long-term', ['long-term'], ['backlog']],
+    ],
+  )
+  // A summary bullet is the card's summary; without one, the first other detail stands in.
+  assert.match(JSON.stringify(next.summary), /"value":"One way to "/)
+  assert.ok(!JSON.stringify(next.summary).includes('Summary'))
+  assert.equal(earlier.summary, undefined)
+  assert.deepEqual(r.areas, [
+    { code: 'CFG', name: 'Configuration' },
+    { code: 'CORE', name: 'Core runtime' },
+  ])
+  // An item's place in the full plan is its area heading, else its milestone.
+  assert.deepEqual([config.anchor, earlier.areas[1].items[0].anchor], ['v1.0.0', 'memory'])
+  // The full plan keeps the milestone's section whole: anchor, heading, details and items.
+  const plan = JSON.stringify(next.plan)
+  for (const kept of ['"id":"v1.0.0"', '"id":"v100--next"', 'which way', 'CFG-01', 'DOC-01']) assert.ok(plan.includes(kept), kept)
   const rest = JSON.stringify(r.rest)
   for (const kept of ['"id":"goal"', '"id":"planning-notes"', '"id":"pn-next"', '"id":"next-proposal"', 'Not current behavior']) assert.ok(rest.includes(kept), kept)
   assert.ok(!rest.includes('CFG-01') && !rest.includes('"id":"upcoming"'))

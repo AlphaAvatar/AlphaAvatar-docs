@@ -1,5 +1,5 @@
 import type { Element, Root as HastRoot } from 'hast'
-import type { Heading as MdHeading, Nodes, PhrasingContent, Root, RootContent, Table, TableCell } from 'mdast'
+import type { Heading as MdHeading, ListItem, Nodes, PhrasingContent, Root, RootContent, Table, TableCell } from 'mdast'
 import { toString } from 'mdast-util-to-string'
 import { visit } from 'unist-util-visit'
 import { htmlOf, renderDocument, type Heading } from './markdown'
@@ -7,11 +7,13 @@ import type { Doc } from './manifest'
 import type { Version } from './site'
 
 // The Roadmap page's model, read from the same parsed tree as the document's other outputs and by
-// the rules of its "Format" section: the Timeline table lists the milestones in order; a
-// milestone is an `<a id>` anchor and a `###` heading, its detail bullets before the first table,
-// and item tables grouped by `####` area headings. Text stays the source's, rendered as Markdown.
-// Whatever the page does not show as a milestone is rendered after the timeline as it is; a
-// table, row or milestone that does not follow the format is a problem, never dropped.
+// the rules of its "Format" section: the Timeline table lists the milestones; a milestone is an
+// `<a id>` anchor and a `###` heading, its detail bullets (release, summary, …) before the first
+// table, and item tables grouped by `####` area headings; the Areas table names the areas. Text
+// stays the source's, rendered as Markdown. Each milestone's section is also kept whole, with its
+// anchors, as its full plan; whatever the page does not show as a milestone is rendered after
+// the timeline as it is. A table, row or milestone that does not follow the format is a problem,
+// never dropped.
 
 export const STATUSES = ['proposed', 'planned', 'in-progress', 'implemented', 'done'] as const
 export const RELEASES = ['released', 'in-development', 'planned', 'unscheduled'] as const
@@ -20,6 +22,8 @@ export type Item = {
   id: string
   // The `<AREA>` part of the ID.
   area: string
+  // Where it sits in its milestone's full plan: its area heading's id, else the milestone's.
+  anchor: string
   // A leading bold title, else the whole text; `text` is what follows the title's dash.
   title: HastRoot
   text?: HastRoot
@@ -45,23 +49,39 @@ export type Milestone = {
   notes?: HastRoot
   notesHref?: string
   details: HastRoot
+  // The summary bullet's text, else the first detail after the release bullet.
+  summary?: HastRoot
+  // The milestone's section as written: anchor, heading, details and item tables.
+  plan: HastRoot
   areas: Area[]
 }
+
+// A `##` section of milestones, in document order; its heading's id when the page replaces it.
+export type MilestoneGroup = { heading: Heading; ids: string[]; milestones: string[] }
+
+export type AreaName = { code: string; name: string }
 
 export type Roadmap = {
   title?: Heading
   // Paragraphs of links only between the title and the lead (the language switch).
   preamble: HastRoot
   lead?: HastRoot
-  // The headings the timeline replaces: its section's text and every id they defined.
+  // The Timeline section the page replaces: its heading and every id it defined.
   timeline: { heading: string; ids: string[] }
+  // Milestones in Timeline order; `groups` lists them as the document does.
   milestones: Milestone[]
+  groups: MilestoneGroup[]
+  areas: AreaName[]
   rest: HastRoot
   problems: string[]
 }
 
 const TIMELINE = ['Milestone|Version|Theme|Release|Released|Release notes', '里程碑|版本|主题|发布|发布日期|Release 文档']
 const ITEMS = ['ID|Item|Status|Priority|Date|Notes', 'ID|事项|状态|优先级|日期|说明']
+const AREAS = ['Code|Area|Scope', '代码|领域|范围']
+// Detail bullets by their bold label, in each language.
+const RELEASE_LABEL = /^(Release:|发布)$/
+const SUMMARY_LABEL = /^(Summary:|摘要)$/
 const MILESTONE = /^(v\d+\.\d+\.\d+|earlier|backlog)$/
 const ITEM_ID = /^([A-Z]+)-\d+$/
 const DATE = /^\d{4}-\d{2}(-\d{2})?$|^\d{4}-\d{2}-\d{2} – \d{4}-\d{2}-\d{2}$/
@@ -104,6 +124,17 @@ function split(nodes: RootContent[], depth: number): Section[] {
 
 const linkOnly = (node: RootContent) =>
   node.type === 'paragraph' && node.children.every((c) => c.type === 'link' || (c.type === 'text' && !c.value.trim()))
+
+// A detail bullet's label and what follows it: `**Summary:** text` or `**摘要**：text`.
+function labelled(item: ListItem): { label?: string; rest: PhrasingContent[]; all: PhrasingContent[] } {
+  const paragraph = item.children[0]
+  const all = paragraph?.type === 'paragraph' ? paragraph.children : []
+  const [first, ...rest] = all
+  if (first?.type !== 'strong') return { rest: all, all }
+  const [next, ...more] = rest
+  const trimmed = next?.type === 'text' ? [{ ...next, value: next.value.replace(/^[\s：:]+/, '') }, ...more] : rest
+  return { label: text(first), rest: trimmed, all }
+}
 
 // `**Title** — text`: the bold lead is the item's title; without one, the whole text is.
 function titled(nodes: PhrasingContent[]): { title: PhrasingContent[]; text?: PhrasingContent[] } {
@@ -149,7 +180,7 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
     else rest.push(node)
   }
 
-  type Row = Omit<Milestone, 'anchors' | 'heading' | 'label' | 'details' | 'areas'>
+  type Row = Omit<Milestone, 'anchors' | 'heading' | 'label' | 'details' | 'summary' | 'plan' | 'areas'>
   const timelineRows = (table: Table): Row[] =>
     table.children.slice(1).flatMap((row) => {
       const cells = row.children
@@ -172,7 +203,7 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
     })
 
   const seen = new Set<string>()
-  const itemRows = (table: Table, milestone: string): Item[] =>
+  const itemRows = (table: Table, milestone: string, anchor: string): Item[] =>
     table.children.slice(1).flatMap((row) => {
       const cells = row.children
       if (cells.length !== 6) return problem(row, `${milestone}: item row has ${cells.length} cells, not 6`)
@@ -190,6 +221,7 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
         {
           id,
           area,
+          anchor,
           title: inline(parts.title),
           text: parts.text?.length ? inline(parts.text) : undefined,
           status,
@@ -208,7 +240,7 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
     const areas: Area[] = []
     const take = (nodes: RootContent[], area: () => Area) => {
       for (const node of nodes) {
-        if (node.type === 'table' && ITEMS.includes(header(node))) area().items.push(...itemRows(node, row.id))
+        if (node.type === 'table' && ITEMS.includes(header(node))) area().items.push(...itemRows(node, row.id, area().heading?.id || row.id))
         else if (!areas.length) details.push(node)
         else problem(node, `${row.id}: ${node.type === 'table' ? 'a table that is not an item table' : `${node.type} between item tables`}`)
       }
@@ -222,7 +254,20 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
       areas.push(area)
       take(s.body, () => area)
     }
-    return { ...row, anchors: unit.anchors.filter((a) => a !== row.id), heading, label: heading.text.split(' · ')[0], details: html(details), areas }
+    const bullets = details.flatMap((n) => (n.type === 'list' ? n.children.map(labelled) : []))
+    const own = bullets.find((b) => b.label && SUMMARY_LABEL.test(b.label))
+    const other = bullets.find((b) => !b.label || !(RELEASE_LABEL.test(b.label) || SUMMARY_LABEL.test(b.label)))
+    const summary = own ? own.rest : other?.all
+    return {
+      ...row,
+      anchors: unit.anchors.filter((a) => a !== row.id),
+      heading,
+      label: heading.text.split(' · ')[0],
+      details: html(details),
+      summary: summary?.length ? inline(summary) : undefined,
+      plan: html(unit.nodes),
+      areas,
+    }
   }
 
   // Sections whose content is only the Timeline table and milestones are replaced by the timeline,
@@ -231,6 +276,7 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
   let timelineHeading = ''
   const timelineIds: string[] = []
   const units = new Map<string, Section>()
+  const groups: MilestoneGroup[] = []
   for (const section of sections) {
     const [own, ...subsections] = split(section.body, 3)
     const kept: RootContent[] = []
@@ -246,6 +292,7 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
         replaced = true
       }
     }
+    const found: string[] = []
     for (const sub of subsections) {
       const id = sub.anchors.find((a) => MILESTONE.test(a))
       if (!id) {
@@ -254,11 +301,17 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
         problem(sub.heading, `milestone ${id} has a second section`)
       } else {
         units.set(id, sub)
+        found.push(id)
         replaced = true
       }
     }
-    if (replaced && !kept.length) timelineIds.push(...section.anchors, headingOf(section.heading!).id)
-    else rest.push(...section.nodes.slice(0, section.nodes.length - section.body.length), ...kept)
+    // A section left with nothing of its own gives its ids to what replaces it: the Timeline's to
+    // the timeline, a milestone section's to its group of cards.
+    const empty = replaced && !kept.length
+    const heading = headingOf(section.heading!)
+    if (found.length) groups.push({ heading, ids: empty ? [...section.anchors, heading.id] : [], milestones: found })
+    else if (empty) timelineIds.push(...section.anchors, heading.id)
+    if (!empty) rest.push(...section.nodes.slice(0, section.nodes.length - section.body.length), ...kept)
   }
   if (!rows) problem(undefined, 'has no Timeline table')
   for (const [id, unit] of units) if (!rows?.some((r) => r.id === id)) problem(unit.heading, `milestone ${id} is not in the Timeline`)
@@ -269,12 +322,20 @@ export function parseRoadmap(tree: Root, where: string): Roadmap {
     return [milestoneOf(row, unit)]
   })
 
+  const areas: AreaName[] = []
+  visit(tree, 'table', (table: Table) => {
+    if (!AREAS.includes(header(table))) return
+    for (const row of table.children.slice(1)) areas.push({ code: text(row.children[0]), name: text(row.children[1]) })
+  })
+
   return {
     title: at < 0 ? undefined : headingOf(tree.children[at] as MdHeading),
     preamble: html(preamble),
     lead: lead && html([lead]),
     timeline: { heading: timelineHeading, ids: timelineIds },
     milestones,
+    groups,
+    areas,
     rest: html(rest),
     problems,
   }

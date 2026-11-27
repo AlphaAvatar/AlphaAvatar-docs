@@ -10,7 +10,7 @@ import { homeMarkdown, homeModel } from '../lib/home'
 import { sectionTitle } from '../lib/manifest'
 import { htmlSections, renderDocument } from '../lib/markdown'
 import { roadmapOf } from '../lib/roadmap'
-import { allLocales, assetHref, homeMarkdownHref, llmsHref, markdownHref, nav, pageHref, searchHref, versions } from '../lib/site'
+import { allLocales, assetHref, docPages, homeMarkdownHref, llmsHref, markdownHref, nav, pageHref, searchHref, versions, type NavNode } from '../lib/site'
 
 const PUBLIC = path.join(process.cwd(), 'public')
 const files = new Map<string, string | { copy: string }>()
@@ -20,6 +20,16 @@ const out = (href: string, body: string | { copy: string }) => files.set(path.jo
 
 for (const v of versions()) {
   const sha = v.source.sha
+  // A group's documents under its heading, its own groups after them.
+  const llmsGroup = (n: NavNode, parents: string[], locale: string): string[] => {
+    const title = [...parents, sectionTitle(n.group, locale)]
+    return [
+      ...(n.pages.length
+        ? [`### ${title.join(' / ')}`, '', ...n.pages.map((p) => `- [${p.doc.title}](${site.url}${markdownHref(v.id, p.doc)}): ${p.doc.path}${p.doc.lang === locale ? '' : ` (${p.doc.lang})`}`), '']
+        : []),
+      ...n.groups.flatMap((g) => llmsGroup(g, title, locale)),
+    ]
+  }
 
   for (const doc of v.docs.values()) {
     if (doc.format === 'html') {
@@ -34,30 +44,31 @@ for (const v of versions()) {
 
   for (const locale of v.locales) {
     // Every page as it is read in this language: its links and anchors must resolve too.
-    for (const g of nav(v, locale)) for (const p of g.pages) if (p.doc.format !== 'html') problems.push(...renderDocument(v, p.doc, locale).problems)
+    const pages = docPages(v, locale)
+    for (const p of pages) if (p.doc.format !== 'html') problems.push(...renderDocument(v, p.doc, locale).problems)
     // The Roadmap page reads its milestones and items from the source; what it cannot read stops here.
-    for (const g of nav(v, locale)) for (const p of g.pages) if (p.doc.type === 'roadmap') problems.push(...roadmapOf(v, p.doc, locale).problems)
+    for (const p of pages) if (p.doc.type === 'roadmap') problems.push(...roadmapOf(v, p.doc, locale).problems)
     try {
       out(homeMarkdownHref(v.id, locale), homeMarkdown(homeModel(v, locale)))
     } catch (error) {
       problems.push((error as Error).message)
     }
 
-    const groups = nav(v, locale)
-    const records = groups.flatMap((g) =>
-      g.pages.flatMap((page) => {
-        const sections = page.doc.format === 'html' ? htmlSections(v, page.doc) : renderDocument(v, page.doc, locale).sections
-        return sections.map((s) => ({
-          href: pageHref(v.id, locale, page.route) + (s.anchor ? `#${s.anchor}` : ''),
-          title: page.doc.title,
-          heading: s.heading,
-          section: sectionTitle(g.section, locale),
-          lang: page.doc.lang,
-          path: page.doc.path,
-          text: s.text,
-        }))
-      }),
-    )
+    // A result names its document, its section and its anchor; the page it opens is in that section.
+    const records = pages.flatMap((page) => {
+      const sections = page.doc.format === 'html' ? htmlSections(v, page.doc) : renderDocument(v, page.doc, locale).sections
+      return sections.map((s) => ({
+        href: pageHref(v.id, locale, page.route) + (s.anchor ? `#${s.anchor}` : ''),
+        id: page.key,
+        title: page.doc.title,
+        heading: s.heading,
+        sectionId: page.section.id,
+        section: sectionTitle(page.section, locale),
+        lang: page.doc.lang,
+        path: page.doc.path,
+        text: s.text,
+      }))
+    })
     out(searchHref(v.id, locale), JSON.stringify({ version: v.id, locale, sha, records }))
 
     const lines = [
@@ -68,12 +79,7 @@ for (const v of versions()) {
       '',
       `Home: ${site.url}${homeMarkdownHref(v.id, locale)}`,
       '',
-      ...groups.flatMap((g) => [
-        `## ${sectionTitle(g.section, locale)}`,
-        '',
-        ...g.pages.map((p) => `- [${p.doc.title}](${site.url}${markdownHref(v.id, p.doc)}): ${p.doc.path}${p.doc.lang === locale ? '' : ` (${p.doc.lang})`}`),
-        '',
-      ]),
+      ...nav(v, locale).flatMap((s) => [`## ${sectionTitle(s.section, locale)}`, '', ...s.groups.flatMap((n) => llmsGroup(n, [], locale))]),
     ]
     out(llmsHref(v.id, locale), lines.join('\n'))
   }

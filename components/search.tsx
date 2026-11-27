@@ -6,7 +6,9 @@ import { strings } from '@/lib/i18n'
 // The search overlay: opened from the header or Cmd/Ctrl+K, it searches the index of the
 // version and language being read and keeps its query between openings.
 
-export type SearchRecord = { href: string; title: string; heading: string; section: string; lang: string; path: string; text: string }
+// One heading of one page: its URL (version, language and anchor included), its document's key,
+// and the section it belongs to, which the page it opens shows as current.
+export type SearchRecord = { href: string; id: string; title: string; heading: string; sectionId: string; section: string; lang: string; path: string; text: string }
 export type Indexed = SearchRecord & { haystack: [string, string, string] }
 
 const OPEN = 'docs:search'

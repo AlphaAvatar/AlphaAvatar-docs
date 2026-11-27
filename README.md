@@ -18,15 +18,16 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 | `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap | `public/` (ignored) |
 | `next build` | One HTML page per published document, language and version | `out/` |
 
-`pnpm typecheck` and `pnpm lint` check the code.
+`pnpm test`, `pnpm typecheck` and `pnpm lint` check the code.
 
 ## Sources
 
-- The main repository's `docs/manifest.yaml`, read from each snapshot: which files are published,
-  their titles, sections and order, language, translation groups, routes, status, and release
-  tags and dates. The files it lists hold all text, including the Roadmap.
+- The main repository's `docs/manifest.yaml` (schema 2), read from each snapshot: the sections
+  and their groups, with titles and summaries in each language; which files are published, with
+  their group and order, title, language, translation group, route, status, and release tag and
+  date. The files it lists hold all text, including the Roadmap.
 - This repository: layout and components from the Figma file's Docs page, interface text
-  (`lib/i18n.ts`), and `site.config.ts` (published refs, header sections, language names).
+  (`lib/i18n.ts`), and `site.config.ts` (published refs, their edit branches, language names).
 
 ## How the site reads the repository
 
@@ -37,13 +38,25 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 - **Versions are configuration.** Each entry in `site.config.ts` `versions` is one version of
   the docs, built from its own ref; adding a version adds an entry, not a branch of this site.
   The first entry, `v0.7.0`, reads AlphaAvatar's `dev/v0.7.0` branch.
+- **Sections.** The header shows the manifest's sections (Guide, Development, Reference, Updates).
+  Every page belongs to one: a document by its group, a section's entry page and a release index
+  by their own. The page's section is current in the header, and the rail shows only that
+  section's tree: groups, their documents, then their own groups, each level 16px further in. On
+  entering a page its groups open; others stay as the reader left them in that section, version
+  and language for the session. Tablet and mobile show the sections as tabs and in the drawer,
+  which can switch section. Previous and next stay within the section.
+- **Generated pages.** Each section has an entry page at `/{section}` (one card per group, with
+  its summary and first page); a group whose documents are all release notes has a release index
+  at `/{group}`. Ordinary groups have no page of their own.
 - **Home page.** `/{lang}/{version}/` is the site's own page, not a document: an introduction, the
   latest release, three directions, two featured documents and resources (`lib/home.ts`). Its
-  HTML and `index.md` come from one model whose entries name manifest sections and documents; a
-  missing one stops the build. No document may take the route `/` (README is at `/overview`).
+  HTML and `index.md` come from one model whose entries name manifest sections, groups and
+  documents; a missing one stops the build. No document may take the route `/` (README is at
+  `/overview`).
 - **URLs.** Pages at `/{lang}/{version}/{route}/`; the Markdown source at
   `/{lang}/{version}/{route}.md`, the home page's at `index.md`, an HTML document at `.html`;
-  search at `/{lang}/{version}/search.json`; `llms.txt` per version and language and at `/llms.txt`;
+  search at `/{lang}/{version}/search.json` (each record names its document and section);
+  `llms.txt` per version and language, by section and group, and at `/llms.txt`;
   repository images at `/_assets/{sha12}/{path}`.
 - **Links.** A link to a published document leads to its page in the language being read (in the
   `.md` output, to its `.md` in the document's own language), whatever file it names; only a link
@@ -59,14 +72,25 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
   document or version. Interface text follows the chosen language.
 - **Versions.** Switching version keeps the document (by translation group or id); if the target
   version does not publish it, the reader stays on the current page and is told.
-- **Roadmap.** The page of a `type: roadmap` document reads its milestones and items from the
-  same parse as its other outputs, by the rules of the Roadmap's own "Format" section
-  (`lib/roadmap.ts`): a timeline in the Timeline table's order, each milestone's details and items
-  as the source writes them, then the rest of the document unchanged. Every anchor the source
-  defines stays on the page. A row or milestone that does not follow the format stops the build.
-  Filters, expanded milestones and the open item live in the URL; without JavaScript every
-  milestone and item is shown. Its `.md` output and search text are those of any document.
+- **Roadmap.** The page of a `type: roadmap` document reads its milestones, items and areas from
+  the same parse as its other outputs, by the rules of the Roadmap's own "Format" section
+  (`lib/roadmap.ts`). It shows one view at a time (`components/timeline.tsx`):
+  - the timeline: a compact card per milestone (title, summary bullet, release state and date,
+    item counts), grouped and ordered as the document groups them, items listed on expanding;
+  - results: the items meeting three independent filters, combined (target version, category
+    from the Areas table, status); choices come from the snapshot, and a draft changes nothing
+    until applied;
+  - a milestone's full plan: its section as written, chosen by the URL's anchor (the source's
+    own anchors, so links into the Roadmap open the right plan);
+  - an item's details, over the others.
+  Filters, expanded milestones and the open item live in the URL (`lib/roadmap-view.ts`);
+  leaving the timeline for details or a plan keeps its scroll position and focus to come back
+  to, by the back button or the browser's. Every anchor the source defines stays on the page; a
+  row or milestone that does not follow the format stops the build. Without JavaScript every
+  milestone, item and plan is shown. Its `.md` output and search text are those of any document.
 - **Diagrams.** A ```` ```mermaid ```` block is drawn in the browser; the HTML keeps the code
   block, which is what a reader without JavaScript sees, and Mermaid is loaded only by pages
   that hold a diagram.
-- **Editing** goes to the development branch; published snapshots are never edited.
+- **Editing.** "Edit source" opens the file on the version's `editRef` (for v0.7.0,
+  `dev/v0.7.0`); "View source" stays at the snapshot's commit. Published snapshots are never
+  edited.

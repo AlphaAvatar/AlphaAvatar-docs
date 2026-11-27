@@ -1,38 +1,27 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { test } from 'node:test'
 import type { Element, Root } from 'hast'
 import { visit } from 'unist-util-visit'
 import { site } from '../site.config'
 import { renderDocument } from '../lib/markdown'
-import { loadVersion } from '../lib/site'
+import { entry as fixtureEntry, snapshot, writeSnapshot, load } from './fixture'
 
 // A snapshot with two translated documents (PLAN, STEPS), an English-only guide, a Chinese-only
 // note and the repository README at its overview route.
-const root = mkdtempSync(path.join(tmpdir(), 'docs-links-'))
 const entry = (id: string, file: string, title: string, lang: string, route: string, group = '') =>
-  `  - {id: ${id}, path: ${file}, title: ${title}, type: guide, lang: ${lang}, route: ${route}, section: main, order: 1, ` +
-  `visibility: public, status: current, applies_to: snapshot${group && `, translation_group: ${group}`}}`
+  fixtureEntry(id, file, title, lang, route, group && `, translation_group: ${group}`)
+const docs = [
+  entry('guide', 'docs/guide.md', 'Guide', 'en', '/guide'),
+  entry('plan', 'docs/PLAN.md', 'Plan', 'en', '/plan', 'plan'),
+  entry('plan-zh', 'docs/PLAN-zh.md', '计划', 'zh-CN', '/plan', 'plan'),
+  entry('notes', 'docs/notes-zh.md', '笔记', 'zh-CN', '/notes'),
+  entry('steps', 'docs/STEPS.md', 'Steps', 'en', '/steps', 'steps'),
+  entry('steps-zh', 'docs/STEPS-zh.md', '步骤', 'zh-CN', '/steps', 'steps'),
+  entry('home', 'README.md', 'Overview', 'en', '/overview'),
+  entry('odd-zh', 'docs/odd-zh.md', '另一结构', 'zh-CN', '/odd', 'odd'),
+  entry('odd', 'docs/odd.md', 'Odd', 'en', '/odd', 'odd'),
+]
 const files: Record<string, string> = {
-  'docs/manifest.yaml': [
-    'schema: 1',
-    'repository: test',
-    'sections:',
-    '  - {id: main, title: Main}',
-    'documents:',
-    entry('guide', 'docs/guide.md', 'Guide', 'en', '/guide'),
-    entry('plan', 'docs/PLAN.md', 'Plan', 'en', '/plan', 'plan'),
-    entry('plan-zh', 'docs/PLAN-zh.md', '计划', 'zh-CN', '/plan', 'plan'),
-    entry('notes', 'docs/notes-zh.md', '笔记', 'zh-CN', '/notes'),
-    entry('steps', 'docs/STEPS.md', 'Steps', 'en', '/steps', 'steps'),
-    entry('steps-zh', 'docs/STEPS-zh.md', '步骤', 'zh-CN', '/steps', 'steps'),
-    entry('home', 'README.md', 'Overview', 'en', '/overview'),
-    entry('odd-zh', 'docs/odd-zh.md', '另一结构', 'zh-CN', '/odd', 'odd'),
-    entry('odd', 'docs/odd.md', 'Odd', 'en', '/odd', 'odd'),
-    '',
-  ].join('\n'),
   'docs/guide.md': '# Guide\n\n## Intro\n\nSee the [plan](PLAN.md#goal) and [two](odd.md#two).\n',
   'docs/PLAN.md': '# Plan\n\n[中文](PLAN-zh.md)\n\n## Goal\n\nRead the [guide](guide.md#intro).\n',
   'docs/PLAN-zh.md': '# 计划\n\n[English](PLAN.md#goal)\n\n## 目标\n\n阅读[指南](guide.md#intro)。\n',
@@ -43,11 +32,7 @@ const files: Record<string, string> = {
   'docs/odd.md': '# Odd\n\n## One\n\n## Two\n',
   'docs/odd-zh.md': '# 另一结构\n\n## 一\n',
 }
-for (const [file, body] of Object.entries(files)) {
-  mkdirSync(path.dirname(path.join(root, file)), { recursive: true })
-  writeFileSync(path.join(root, file), body)
-}
-const v = loadVersion({ id: 't', label: 't', ref: 'main', sha: '0'.repeat(40), committed: '', root })
+const v = snapshot(files, docs)
 const doc = (file: string) => v.docs.get(file)!
 
 function htmlLinks(tree: Root): string[] {
@@ -117,12 +102,6 @@ test('an anchor a translation cannot match is reported', () => {
 })
 
 test('no document may take the home page route', () => {
-  const bad = mkdtempSync(path.join(tmpdir(), 'docs-home-'))
-  mkdirSync(path.join(bad, 'docs'))
-  writeFileSync(path.join(bad, 'README.md'), '# Project\n')
-  writeFileSync(
-    path.join(bad, 'docs/manifest.yaml'),
-    ['schema: 1', 'repository: test', 'sections:', '  - {id: main, title: Main}', 'documents:', entry('home', 'README.md', 'Home', 'en', '/'), ''].join('\n'),
-  )
-  assert.throws(() => loadVersion({ id: 't', label: 't', ref: 'main', sha: '0'.repeat(40), committed: '', root: bad }), /route \/, which is the site's home page/)
+  const bad = writeSnapshot({ 'README.md': '# Project\n' }, [entry('home', 'README.md', 'Home', 'en', '/')])
+  assert.throws(() => load(bad), /route \/, which is the site's home page/)
 })

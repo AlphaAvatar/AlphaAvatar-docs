@@ -3,9 +3,11 @@ import { test } from 'node:test'
 import { isValidElement, type ReactNode } from 'react'
 import { rank, snippet, type Indexed, type SearchRecord } from '../components/search'
 
-const indexed = (r: Omit<SearchRecord, 'section' | 'lang' | 'path'>): Indexed => ({
+const indexed = (r: Omit<SearchRecord, 'id' | 'section' | 'sectionId' | 'lang' | 'path'>): Indexed => ({
   ...r,
-  section: 'Commands',
+  id: r.href,
+  sectionId: 'reference',
+  section: 'Reference',
   lang: 'en',
   path: 'docs/cli/doctor.md',
   haystack: [r.title.toLowerCase(), r.heading.toLowerCase(), r.text.toLowerCase()],

@@ -1,5 +1,5 @@
 import { site } from '../site.config'
-import { loadManifest, type Doc, type Manifest, type Section } from './manifest'
+import { loadManifest, places, type Doc, type Group, type Manifest, type Section } from './manifest'
 import { snapshots, type Snapshot } from './sources'
 
 // The site's pages for one version and language, derived from that snapshot's manifest only.
@@ -14,18 +14,25 @@ export type DocPage = {
   doc: Doc
   variants: Doc[]
   section: Section
+  // The document's groups from its section down, its own last.
+  groups: Group[]
 }
 
-// A section without a document at /<section id> lists its documents there.
+// A section's entry page, at /<section id>, which the site writes.
 export type SectionPage = { kind: 'section'; key: string; locale: string; route: string; section: Section; pages: DocPage[] }
+
+// The one page a group has of its own: release notes listed with their dates, at /<group id>.
+export type ReleasesPage = { kind: 'releases'; key: string; locale: string; route: string; section: Section; group: Group; pages: DocPage[] }
 
 // The landing page at / of every version and language; the site writes it (lib/home.ts).
 // Its key cannot be a manifest id or translation group (README's id is `home`).
 export type HomePage = { kind: 'home'; key: ':home'; locale: string; route: '/' }
 
-export type Page = DocPage | SectionPage | HomePage
+export type Page = DocPage | SectionPage | ReleasesPage | HomePage
 
-export type NavGroup = { section: Section; index?: SectionPage; pages: DocPage[] }
+// A section's navigation: each group's documents, then its own groups.
+export type NavNode = { group: Group; pages: DocPage[]; groups: NavNode[]; index?: ReleasesPage }
+export type NavSection = { section: Section; entry?: SectionPage; groups: NavNode[] }
 
 export type Version = {
   id: string
@@ -40,24 +47,42 @@ export type Version = {
 
 const localeOrder = (preferred: string) => [preferred, site.defaultLocale, ...Object.keys(site.locales)]
 
+// Navigation order: sections, their groups, a group's documents before its own groups.
+function groupRanks(manifest: Manifest): Map<string, number[]> {
+  const ranks = new Map<string, number[]>()
+  manifest.sections.forEach((section, s) =>
+    section.groups.forEach((group, g) => {
+      ranks.set(group.id, [s, g, 0])
+      group.groups?.forEach((sub, i) => ranks.set(sub.id, [s, g, i + 1]))
+    }),
+  )
+  return ranks
+}
+
+function compare(a: number[], b: number[]): number {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] - b[i]
+  return 0
+}
+
 function buildPages(manifest: Manifest, locale: string): Page[] {
-  const groups = new Map<string, Doc[]>()
+  const byGroup = new Map<string, Doc[]>()
   for (const doc of manifest.documents) {
     if (doc.visibility !== 'public') continue
     const key = doc.translation_group ?? doc.id
-    groups.set(key, [...(groups.get(key) ?? []), doc])
+    byGroup.set(key, [...(byGroup.get(key) ?? []), doc])
   }
 
+  const where = places(manifest)
+  const ranks = groupRanks(manifest)
   const order = localeOrder(locale)
   const rank = (lang: string) => (order.includes(lang) ? order.indexOf(lang) : order.length)
-  const sectionRank = (id: string) => manifest.sections.findIndex((s) => s.id === id)
-  const docs: DocPage[] = [...groups].map(([key, variants]) => {
+  const docs: DocPage[] = [...byGroup].map(([key, variants]) => {
     const doc = [...variants].sort((a, b) => rank(a.lang) - rank(b.lang))[0]
-    const section = manifest.sections.find((s) => s.id === doc.section)
-    if (!section) throw new Error(`manifest: ${doc.id} is in unknown section ${doc.section}`)
-    return { kind: 'doc', key, locale, route: doc.route, doc, variants, section }
+    const place = where.get(doc.group)
+    if (!place) throw new Error(`manifest: ${doc.id} is in unknown group ${doc.group}`)
+    return { kind: 'doc', key, locale, route: doc.route, doc, variants, section: place.section, groups: place.groups }
   })
-  docs.sort((a, b) => sectionRank(a.section.id) - sectionRank(b.section.id) || a.doc.order - b.doc.order || a.doc.id.localeCompare(b.doc.id))
+  docs.sort((a, b) => compare([...ranks.get(a.doc.group)!, a.doc.order], [...ranks.get(b.doc.group)!, b.doc.order]) || a.doc.id.localeCompare(b.doc.id))
 
   const routes = new Set<string>(['/'])
   for (const page of docs) {
@@ -66,13 +91,24 @@ function buildPages(manifest: Manifest, locale: string): Page[] {
     routes.add(page.route)
   }
 
-  const indexes: SectionPage[] = manifest.sections.flatMap((section) => {
+  const generated: Page[] = []
+  for (const section of manifest.sections) {
     const pages = docs.filter((p) => p.section.id === section.id)
     const route = `/${section.id}`
-    if (routes.has(route) || !pages.length) return []
-    return [{ kind: 'section', key: `section:${section.id}`, locale, route, section, pages }]
-  })
-  return [{ kind: 'home', key: ':home', locale, route: '/' }, ...docs, ...indexes]
+    if (pages.length && !routes.has(route)) generated.push({ kind: 'section', key: `section:${section.id}`, locale, route, section, pages })
+  }
+  for (const [id, place] of where) {
+    const pages = docs.filter((p) => p.doc.group === id)
+    const route = `/${id}`
+    if (pages.length && pages.every((p) => p.doc.release) && !routes.has(route)) {
+      generated.push({ kind: 'releases', key: `releases:${id}`, locale, route, section: place.section, group: place.groups.at(-1)!, pages })
+    }
+  }
+  for (const page of generated) {
+    if (routes.has(page.route)) throw new Error(`manifest: route ${page.route} repeats in ${locale}`)
+    routes.add(page.route)
+  }
+  return [{ kind: 'home', key: ':home', locale, route: '/' }, ...docs, ...generated]
 }
 
 export function loadVersion(source: Snapshot): Version {
@@ -96,32 +132,56 @@ export const pageOf = (v: Version, locale: string, route: string) => v.pages.get
 
 export const pageByKey = (v: Version, locale: string, key: string) => v.pages.get(locale)?.find((p) => p.key === key)
 
-export function nav(v: Version, locale: string): NavGroup[] {
+export const docPages = (v: Version, locale: string) => (v.pages.get(locale) ?? []).filter((p): p is DocPage => p.kind === 'doc')
+
+// The section a page belongs to, whichever way it was reached; the home page has none.
+export const sectionOf = (page: Page): Section | undefined => (page.kind === 'home' ? undefined : page.section)
+
+export function nav(v: Version, locale: string): NavSection[] {
   const pages = v.pages.get(locale) ?? []
+  const docs = docPages(v, locale)
+  const node = (group: Group): NavNode => ({
+    group,
+    pages: docs.filter((p) => p.doc.group === group.id),
+    groups: (group.groups ?? []).map(node).filter((n) => n.pages.length || n.groups.length),
+    index: pages.find((p): p is ReleasesPage => p.kind === 'releases' && p.group.id === group.id),
+  })
   return v.manifest.sections
     .map((section) => ({
       section,
-      index: pages.find((p): p is SectionPage => p.kind === 'section' && p.section.id === section.id),
-      pages: pages.filter((p): p is DocPage => p.kind === 'doc' && p.section.id === section.id),
+      entry: pages.find((p): p is SectionPage => p.kind === 'section' && p.section.id === section.id),
+      groups: section.groups.map(node).filter((n) => n.pages.length || n.groups.length),
     }))
-    .filter((g) => g.pages.length)
+    .filter((s) => s.groups.length)
 }
 
-// The page a section is entered from: its index or its document at /<id>, else its first page.
+// The page a section is entered from: its entry page, else its first document.
 export function sectionEntry(v: Version, locale: string, sectionId: string): Page | undefined {
-  const group = nav(v, locale).find((g) => g.section.id === sectionId)
-  return group && (group.index ?? group.pages.find((p) => p.route === `/${sectionId}`) ?? group.pages[0])
+  const pages = v.pages.get(locale) ?? []
+  return (
+    pages.find((p) => p.kind === 'section' && p.section.id === sectionId) ?? pages.find((p) => p.kind === 'doc' && p.section.id === sectionId)
+  )
 }
 
+// A group's own page: its release index, else its first document (its subgroups' included).
+export function groupEntry(v: Version, locale: string, groupId: string): Page | undefined {
+  const pages = v.pages.get(locale) ?? []
+  return (
+    pages.find((p) => p.kind === 'releases' && p.group.id === groupId) ??
+    pages.find((p) => p.kind === 'doc' && p.groups.some((g) => g.id === groupId))
+  )
+}
+
+// Previous and next stay within the document's section, in navigation order.
 export function neighbours(v: Version, page: DocPage): { previous?: DocPage; next?: DocPage } {
-  const pages = nav(v, page.locale).flatMap((g) => g.pages)
+  const pages = docPages(v, page.locale).filter((p) => p.section.id === page.section.id)
   const at = pages.findIndex((p) => p.key === page.key)
   return { previous: pages[at - 1], next: pages[at + 1] }
 }
 
 // The latest release notes the manifest lists, for the home page spotlight.
 export function latestRelease(v: Version, locale: string): DocPage | undefined {
-  const releases = (v.pages.get(locale) ?? []).filter((p): p is DocPage => p.kind === 'doc' && !!p.doc.release)
+  const releases = docPages(v, locale).filter((p) => !!p.doc.release)
   return releases.sort((a, b) => b.doc.release!.published.localeCompare(a.doc.release!.published))[0]
 }
 
@@ -140,10 +200,12 @@ export const llmsHref = (versionId: string, locale: string) => `/${locale}/${ver
 
 export const assetHref = (sha: string, file: string) => `/_assets/${sha.slice(0, 12)}/${file}`
 
+// The file as this build read it: fixed to the snapshot's commit.
 export const repoHref = (sha: string, file: string, directory = false) =>
   `https://github.com/${site.repository}/${directory ? 'tree' : 'blob'}/${sha}/${file}`
 
-export function editHref(file: string): { href: string; branch: string } | undefined {
-  const development = site.versions.find((v) => v.development)
-  return development && { href: `https://github.com/${site.repository}/edit/${development.ref}/${file}`, branch: development.ref }
+// The file where this version's text is edited: its editRef, which can be ahead of the snapshot.
+export function editHref(v: Version, file: string): { href: string; branch: string } | undefined {
+  const branch = v.source.editRef
+  return branch ? { href: `https://github.com/${site.repository}/edit/${branch}/${file}`, branch } : undefined
 }

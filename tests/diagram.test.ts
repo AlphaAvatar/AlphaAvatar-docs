@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
 import { test } from 'node:test'
 import type { Element } from 'hast'
 import { toString } from 'hast-util-to-string'
@@ -10,21 +7,13 @@ import { renderToString } from 'react-dom/server'
 import { visit } from 'unist-util-visit'
 import { Markdown } from '../components/article'
 import { renderDocument } from '../lib/markdown'
-import { loadVersion } from '../lib/site'
+import { entry, snapshot } from './fixture'
 
 const DIAGRAM = 'flowchart LR\n    a["Source"] -- one-to-many --> b["Segment"]'
 const SOURCE = `# Notes\n\n\`\`\`mermaid\n${DIAGRAM}\n\`\`\`\n\n\`\`\`bash\necho hi\n\`\`\`\n`
 
 test('a Mermaid block is handed to the diagram component with its code kept', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'docs-diagram-'))
-  mkdirSync(path.join(root, 'docs'))
-  writeFileSync(
-    path.join(root, 'docs/manifest.yaml'),
-    'schema: 1\nrepository: test\nsections:\n  - {id: main, title: Main}\ndocuments:\n' +
-      '  - {id: notes, path: docs/notes.md, title: Notes, type: guide, lang: en, route: /notes, section: main, order: 1, visibility: public, status: current, applies_to: snapshot}\n',
-  )
-  writeFileSync(path.join(root, 'docs/notes.md'), SOURCE)
-  const v = loadVersion({ id: 't', label: 't', ref: 'main', sha: '0'.repeat(40), committed: '', root })
+  const v = snapshot({ 'docs/notes.md': SOURCE }, [entry('notes', 'docs/notes.md', 'Notes', 'en', '/notes')])
   const rendered = renderDocument(v, v.docs.get('docs/notes.md')!, 'en')
 
   const blocks: Element[] = []
