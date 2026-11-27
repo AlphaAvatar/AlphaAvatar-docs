@@ -284,25 +284,26 @@ function conf(code: string): Line[] {
   })
 }
 
-const GRAMMARS: Record<string, [string, (code: string) => Line[]]> = {
-  bash: ['Bash', bash],
-  sh: ['Shell', bash],
-  shell: ['Shell', bash],
-  zsh: ['Zsh', bash],
-  yaml: ['YAML', yaml],
-  yml: ['YAML', yaml],
-  json: ['JSON', json],
-  python: ['Python', python],
-  py: ['Python', python],
-  dotenv: ['.env', conf],
-  env: ['.env', conf],
-  ini: ['INI', conf],
-  toml: ['TOML', conf],
-}
+// A Map, so that a name such as `constructor` or `__proto__` is just another unknown language.
+const GRAMMARS = new Map<string, [string, (code: string) => Line[]]>([
+  ['bash', ['Bash', bash]],
+  ['sh', ['Shell', bash]],
+  ['shell', ['Shell', bash]],
+  ['zsh', ['Zsh', bash]],
+  ['yaml', ['YAML', yaml]],
+  ['yml', ['YAML', yaml]],
+  ['json', ['JSON', json]],
+  ['python', ['Python', python]],
+  ['py', ['Python', python]],
+  ['dotenv', ['.env', conf]],
+  ['env', ['.env', conf]],
+  ['ini', ['INI', conf]],
+  ['toml', ['TOML', conf]],
+])
 
 // The code's lines in tokens and its language's name, for a language this site reads; undefined
 // for any other, which is shown as plain text.
 export function highlight(lang: string | undefined, code: string): { label: string; lines: Line[] } | undefined {
-  const grammar = lang ? GRAMMARS[lang.toLowerCase()] : undefined
+  const grammar = lang ? GRAMMARS.get(lang.toLowerCase()) : undefined
   return grammar && { label: grammar[0], lines: grammar[1](code) }
 }

@@ -43,8 +43,9 @@ function joinLines<T>(lines: T[][], piece: (part: T, i: number) => ReactNode): R
 
 // The source's HTML tree as React. A code block is one of three kinds, by what the source says
 // it is, never by its words: a recording (```terminal NAME) in the recording's own colors; a
-// language this site reads, colored by its grammar; anything else as plain text. Tables scroll
-// in their own region and Mermaid blocks are drawn once the page runs.
+// language this site reads, colored by its grammar; anything else, an unknown language too, as
+// plain text, labeled so. Tables scroll in their own region and Mermaid blocks are drawn once
+// the page runs.
 export function Markdown({ hast, locale }: { hast: Root; locale: string }) {
   const t = strings(locale)
   const components: Partial<Components> = {
@@ -92,7 +93,7 @@ export function Markdown({ hast, locale }: { hast: Root; locale: string }) {
         )
       }
       return (
-        <CodeBlock kind="plain" label={lang && lang !== 'text' ? lang : t.plainText} text={text} lines={text.split('\n').length} locale={locale}>
+        <CodeBlock kind="plain" label={t.plainText} text={text} lines={text.split('\n').length} locale={locale}>
           {text}
         </CodeBlock>
       )

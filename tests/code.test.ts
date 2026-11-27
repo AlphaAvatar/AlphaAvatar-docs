@@ -138,3 +138,22 @@ test('a long block previews its first lines, keeps them all for copying and says
   const block2 = html2.split('<div class="code-block"').find((b) => b.includes('l9'))!
   assert.ok(!block2.includes('data-long=""') && block2.includes('data-long-mobile=""'))
 })
+
+test('a language named like an object property is an unknown one: plain text, as written', () => {
+  const code = 'a.constructor = {}\n__proto__: x\n  "kept"  '
+  for (const lang of ['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf', 'Constructor'])
+    assert.equal(highlight(lang, code), undefined, lang)
+  const v = recorded('```constructor\na.constructor = {}\n```\n\n```__proto__\n__proto__: x\n  "kept"\n```')
+  const r = renderDocument(v, v.docs.get('docs/a.md')!, 'en')
+  assert.deepEqual(r.problems, [])
+  const html = renderToString(createElement(Markdown, { hast: r.hast, locale: 'en' }))
+  const blocks = html.split('<div class="code-block"').filter((b) => b.includes('constructor = {}') || b.includes('__proto__: x'))
+  assert.equal(blocks.length, 2)
+  for (const block of blocks) {
+    assert.match(block, /^ data-kind="plain"/)
+    assert.match(block, /<span class="code-label">Plain text<\/span>/)
+    assert.ok(!block.includes('tok-'))
+  }
+  assert.match(blocks[0], /<code[^>]*>a\.constructor = \{\}<\/code>/)
+  assert.match(blocks[1], /<code[^>]*>__proto__: x\n  &quot;kept&quot;<\/code>/)
+})

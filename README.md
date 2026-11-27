@@ -99,10 +99,11 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
   ```` ```terminal NAME ```` shows recording NAME of the repository's `docs/cli/cli-output.json`
   in its recorded colors (the data's palette for 4-bit codes, 256-color and RGB codes as recorded;
   `lib/terminal.ts`), and must hold the text it showed; a language the site reads (Bash, YAML,
-  JSON, Python, `.env`, INI, TOML) is colored by its grammar (`lib/highlight.ts`); anything else is
-  plain text. Copy takes the whole text, hidden preview lines too, never the toolbar or escape
-  codes. A long block previews 320 px (240 px on a phone) until expanded; only the code scrolls
-  sideways.
+  JSON, Python, `.env`, INI, TOML) is colored by its grammar (`lib/highlight.ts`); anything else,
+  an unknown language too, is plain text, labeled so. Copy takes the whole text, hidden preview
+  lines too, never the toolbar or escape codes; a failure says what there is to do: a code
+  block's code is selected for copying by hand, and its hint says so only while it is. A long
+  block previews 320 px (240 px on a phone) until expanded; only the code scrolls sideways.
 - **Diagrams.** A ```` ```mermaid ```` block is drawn in the browser; the HTML keeps the code
   block, which is what a reader without JavaScript sees, and Mermaid is loaded only by pages
   that hold a diagram.
