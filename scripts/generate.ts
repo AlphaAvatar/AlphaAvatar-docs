@@ -10,13 +10,13 @@ import { homeMarkdown, homeModel } from '../lib/home'
 import { sectionTitle } from '../lib/manifest'
 import { htmlSections, renderDocument } from '../lib/markdown'
 import { roadmapOf } from '../lib/roadmap'
-import { allLocales, assetHref, docPages, homeMarkdownHref, llmsHref, markdownHref, nav, pageHref, searchHref, versions, type NavNode } from '../lib/site'
+import { allLocales, assetHref, docPages, homeMarkdownHref, llmsHref, nav, outputFile, pageHref, searchHref, sourceHref, versions, type NavNode } from '../lib/site'
 
 const PUBLIC = path.join(process.cwd(), 'public')
 const files = new Map<string, string | { copy: string }>()
 const problems: string[] = []
 
-const out = (href: string, body: string | { copy: string }) => files.set(path.join(PUBLIC, href), body)
+const out = (href: string, body: string | { copy: string }) => files.set(path.join(PUBLIC, outputFile(href)), body)
 
 for (const v of versions()) {
   const sha = v.source.sha
@@ -25,7 +25,7 @@ for (const v of versions()) {
     const title = [...parents, sectionTitle(n.group, locale)]
     return [
       ...(n.pages.length
-        ? [`### ${title.join(' / ')}`, '', ...n.pages.map((p) => `- [${p.doc.title}](${site.url}${markdownHref(v.id, p.doc)}): ${p.doc.path}${p.doc.lang === locale ? '' : ` (${p.doc.lang})`}`), '']
+        ? [`### ${title.join(' / ')}`, '', ...n.pages.map((p) => `- [${p.doc.title}](${site.url}${sourceHref(v.id, p.doc)}): ${p.doc.path}${p.doc.lang === locale ? '' : ` (${p.doc.lang})`}`), '']
         : []),
       ...n.groups.flatMap((g) => llmsGroup(g, title, locale)),
     ]
@@ -33,12 +33,12 @@ for (const v of versions()) {
 
   for (const doc of v.docs.values()) {
     if (doc.format === 'html') {
-      out(markdownHref(v.id, doc), { copy: path.join(v.source.root, doc.path) })
+      out(sourceHref(v.id, doc), { copy: path.join(v.source.root, doc.path) })
       continue
     }
     const rendered = renderDocument(v, doc, doc.lang)
     problems.push(...rendered.problems)
-    out(markdownHref(v.id, doc), rendered.markdown)
+    out(sourceHref(v.id, doc), rendered.markdown)
     for (const asset of rendered.assets) out(assetHref(sha, asset), { copy: path.join(v.source.root, asset) })
   }
 
@@ -114,7 +114,7 @@ if (problems.length) {
 }
 
 // Generated roots only; public/brand and public/icons belong to the site.
-for (const root of [...allLocales(), '_assets', 'llms.txt', 'sitemap.xml']) rmSync(path.join(PUBLIC, root), { recursive: true, force: true })
+for (const root of [...allLocales(), '_assets', '_html', 'llms.txt', 'sitemap.xml']) rmSync(path.join(PUBLIC, root), { recursive: true, force: true })
 for (const [file, body] of files) {
   mkdirSync(path.dirname(file), { recursive: true })
   if (typeof body === 'string') writeFileSync(file, body)

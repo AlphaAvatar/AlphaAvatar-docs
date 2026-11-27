@@ -181,6 +181,16 @@ export function NavDrawer({ locale, sections, section, current, memory }: { loca
   )
 }
 
+// The anchor a URL's hash names, decoded: '' when there is none, or when it does not decode (a
+// stray `%`), so that a broken link opens the page as it is. Every reader of an anchor uses this.
+export function anchorOf(hash: string): string {
+  try {
+    return decodeURIComponent(hash.replace(/^#/, ''))
+  } catch {
+    return ''
+  }
+}
+
 function useActiveHeading(entries: TocEntry[]) {
   const [active, setActive] = useState(entries[0]?.id)
   useEffect(() => {

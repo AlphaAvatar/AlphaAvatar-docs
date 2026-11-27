@@ -1,6 +1,6 @@
 import { site } from '../site.config'
 import { places, sectionTitle } from './manifest'
-import { groupEntry, latestRelease, markdownHref, pageByKey, pageHref, sectionEntry, type DocPage, type Version } from './site'
+import { groupEntry, latestRelease, pageByKey, pageHref, sectionEntry, sourceHref, type DocPage, type Version } from './site'
 
 // The home page of one version and language: its HTML (components/home.tsx) and its index.md
 // both come from this model. The short copy is navigation, written here in each interface
@@ -141,18 +141,18 @@ export function homeModel(v: Version, locale: string): HomeModel {
       const section = v.manifest.sections.find((s) => s.id === to.section)
       if (!entry || !section) throw new Error(`${where}: section ${to.section} is not published`)
       const href = pageHref(v.id, locale, entry.route)
-      return { href, md: entry.kind === 'doc' ? site.url + markdownHref(v.id, entry.doc) : site.url + href, title: sectionTitle(section, locale) }
+      return { href, md: entry.kind === 'doc' ? site.url + sourceHref(v.id, entry.doc) : site.url + href, title: sectionTitle(section, locale) }
     }
     if ('group' in to) {
       const entry = groupEntry(v, locale, to.group)
       const place = places(v.manifest).get(to.group)
       if (!entry || !place) throw new Error(`${where}: group ${to.group} is not published`)
       const href = pageHref(v.id, locale, entry.route)
-      return { href, md: entry.kind === 'doc' ? site.url + markdownHref(v.id, entry.doc) : site.url + href, title: sectionTitle(place.groups.at(-1)!, locale) }
+      return { href, md: entry.kind === 'doc' ? site.url + sourceHref(v.id, entry.doc) : site.url + href, title: sectionTitle(place.groups.at(-1)!, locale) }
     }
     const page = pageByKey(v, locale, to.doc)
     if (page?.kind !== 'doc') throw new Error(`${where}: document ${to.doc} is not published`)
-    return { href: pageHref(v.id, locale, page.route), md: site.url + markdownHref(v.id, page.doc), page }
+    return { href: pageHref(v.id, locale, page.route), md: site.url + sourceHref(v.id, page.doc), page }
   }
 
   const release = latestRelease(v, locale)
@@ -175,7 +175,7 @@ export function homeModel(v: Version, locale: string): HomeModel {
       published: c.published(release.doc.release.published),
       action: c.releaseAction,
       href: pageHref(v.id, locale, release.route),
-      md: site.url + markdownHref(v.id, release.doc),
+      md: site.url + sourceHref(v.id, release.doc),
     },
     directions: c.directions.map((d) => link({ ...d, icon: d.icon as Icon })),
     featuredTitle: c.featuredTitle,

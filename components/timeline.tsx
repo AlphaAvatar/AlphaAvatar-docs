@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
 import { strings } from '@/lib/i18n'
 import { isFiltered, parseView, results, sameFilters, statusCounts, viewSearch, type Filters, type View } from '@/lib/roadmap-view'
+import { anchorOf } from './navigation'
 
 // The Roadmap's views (Figma "Docs / … / Roadmap"), one at a time:
 // - the timeline: one compact card per milestone, grouped as the document groups them, each with
@@ -103,6 +104,10 @@ function focusOn(key: string, scroll: boolean) {
   found?.focus({ preventScroll: !scroll })
 }
 
+// The full plan an anchor opens: none for an anchor no plan holds, `constructor` included, which
+// shows the timeline (or the results) as without one.
+export const planFor = (planOf: Record<string, string>, anchor: string) => (Object.hasOwn(planOf, anchor) ? planOf[anchor] : undefined)
+
 // Moving between views jumps; the page's smooth scrolling is for reading within one.
 const jumpTo = (top: number) => window.scrollTo({ top, behavior: 'instant' })
 const jumpToId = (id: string) => document.getElementById(id)?.scrollIntoView({ behavior: 'instant' })
@@ -112,8 +117,8 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
   const search = useSyncExternalStore(subscribe, () => window.location.search, () => '')
   const hash = useSyncExternalStore(subscribe, () => window.location.hash, () => '')
   const view = useMemo(() => parseView(search), [search])
-  const anchor = decodeURIComponent(hash.slice(1))
-  const plan = planOf[anchor]
+  const anchor = anchorOf(hash)
+  const plan = planFor(planOf, anchor)
   const kind = plan ? 'plan' : isFiltered(view) ? 'results' : 'timeline'
 
   const milestones = useMemo(() => groups.flatMap((g) => g.milestones), [groups])
@@ -268,9 +273,10 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
     const link = (e.target as HTMLElement).closest('a')
     if (!link || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey) return
     const url = new URL(link.href, window.location.href)
-    if (url.pathname !== path() || !url.hash) return
+    const target = anchorOf(url.hash)
+    if (url.pathname !== path() || !target) return
     e.preventDefault()
-    leaveItemFor(decodeURIComponent(url.hash.slice(1)))
+    leaveItemFor(target)
   }
 
   /* Pieces */

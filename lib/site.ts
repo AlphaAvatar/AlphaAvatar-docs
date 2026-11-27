@@ -190,7 +190,15 @@ export function latestRelease(v: Version, locale: string): DocPage | undefined {
 export const pageHref = (versionId: string, locale: string, route: string) =>
   `/${locale}/${versionId}${route === '/' ? '' : route}/`
 
-export const markdownHref = (versionId: string, doc: Doc) => `/${doc.lang}/${versionId}${doc.route}${doc.format === 'html' ? '.html' : '.md'}`
+// A document's own file, the one address every link to it uses: Markdown beside its page; HTML in
+// a directory of its own under /_html, whose index is served at the directory as every page is.
+// The host serves `X.html` at `/X/`, never at `X.html`, so a file beside its page would take the
+// page's address (scripts/check-export.ts).
+export const sourceHref = (versionId: string, doc: Doc) =>
+  doc.format === 'html' ? `/_html${pageHref(versionId, doc.lang, doc.route)}` : `/${doc.lang}/${versionId}${doc.route}.md`
+
+// The output file an address of this site is written to: a directory's is its index.
+export const outputFile = (href: string) => (href.endsWith('/') ? `${href}index.html` : href)
 
 export const homeMarkdownHref = (versionId: string, locale: string) => `/${locale}/${versionId}/index.md`
 

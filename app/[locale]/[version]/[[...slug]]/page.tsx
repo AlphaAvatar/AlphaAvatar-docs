@@ -8,7 +8,7 @@ import { Shell } from '@/components/shell'
 import { homeModel } from '@/lib/home'
 import { sectionTitle } from '@/lib/manifest'
 import { renderDocument } from '@/lib/markdown'
-import { homeMarkdownHref, markdownHref, pageByKey, pageHref, pageOf, version, versions } from '@/lib/site'
+import { homeMarkdownHref, pageByKey, pageHref, pageOf, sourceHref, version, versions } from '@/lib/site'
 
 type Params = { locale: string; version: string; slug?: string[] }
 
@@ -33,7 +33,7 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
     page.kind === 'home'
       ? site.name
       : `${page.kind === 'doc' ? page.doc.title : sectionTitle(page.kind === 'releases' ? page.group : page.section, page.locale)} · ${site.name}`
-  const markdown = page.kind === 'home' ? homeMarkdownHref(v.id, page.locale) : page.kind === 'doc' && page.doc.format !== 'html' ? markdownHref(v.id, page.doc) : undefined
+  const markdown = page.kind === 'home' ? homeMarkdownHref(v.id, page.locale) : page.kind === 'doc' && page.doc.format !== 'html' ? sourceHref(v.id, page.doc) : undefined
   const languages = Object.fromEntries(v.locales.map((l) => [l, pageHref(v.id, l, pageByKey(v, l, page.key)!.route)]))
   return {
     title,

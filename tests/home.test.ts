@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { site } from '../site.config'
 import { homeMarkdown, homeModel } from '../lib/home'
-import { markdownHref, pageOf, type Version } from '../lib/site'
+import { pageOf, sourceHref, type Version } from '../lib/site'
 import { entry, snapshot as write } from './fixture'
 
 // A snapshot holding what the home page points at, in the four sections: identifiers only in
@@ -40,7 +40,7 @@ test('every home entry is a page of the snapshot, and index.md links the same en
     const m = homeModel(v, locale)
     const links = [...m.actions, m.release!, ...m.directions, ...m.featured, ...m.resources]
     const markdown = homeMarkdown(m)
-    const markdownFiles = [...v.docs.values()].map((d) => site.url + markdownHref(v.id, d))
+    const markdownFiles = [...v.docs.values()].map((d) => site.url + sourceHref(v.id, d))
     for (const l of links) {
       if (l.href.startsWith('https://')) {
         assert.equal(l.md, l.href)

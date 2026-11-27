@@ -11,12 +11,12 @@ import { renderDocument } from '@/lib/markdown'
 import {
   editHref,
   groupEntry,
-  markdownHref,
   nav,
   neighbours,
   pageByKey,
   pageHref,
   repoHref,
+  sourceHref,
   type DocPage,
   type NavNode,
   type ReleasesPage,
@@ -135,7 +135,7 @@ export function SourceLinks({ v, page }: { v: Version; page: DocPage }) {
   const edit = editHref(v, page.doc.path)
   return (
     <div className="source-links">
-      <a href={markdownHref(v.id, page.doc)}>{page.doc.format === 'html' ? t.viewHtml : t.viewMarkdown}</a>
+      <a href={sourceHref(v.id, page.doc)}>{page.doc.format === 'html' ? t.viewHtml : t.viewMarkdown}</a>
       <a href={repoHref(v.source.sha, page.doc.path)}>{t.viewSource}</a>
       {edit && (
         <>
@@ -172,7 +172,7 @@ function PageActions({ v, page }: { v: Version; page: DocPage }) {
     <div className="page-actions">
       <span className="tag">{v.label}</span>
       <span className="spacer" />
-      {page.doc.format !== 'html' && <CopyButton url={markdownHref(v.id, page.doc)} label={t.copyMarkdown} locale={page.locale} />}
+      {page.doc.format !== 'html' && <CopyButton url={sourceHref(v.id, page.doc)} label={t.copyMarkdown} locale={page.locale} />}
     </div>
   )
 }
@@ -212,7 +212,7 @@ export function DocArticle({ v, page }: { v: Version; page: DocPage }) {
           </div>
         ) : (
           <>
-            <iframe className="html-frame" src={markdownHref(v.id, doc)} title={doc.title} sandbox="" />
+            <iframe className="html-frame" src={sourceHref(v.id, doc)} title={doc.title} sandbox="" />
             <p className="meta">{t.htmlFrame}</p>
           </>
         )}

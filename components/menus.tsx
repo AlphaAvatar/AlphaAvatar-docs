@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { strings } from '@/lib/i18n'
+import { anchorOf } from './navigation'
 
 // Version and language menus, anchored to the header. A version without this document keeps the
 // reader on the current page and says so; it never substitutes another page.
@@ -78,6 +79,15 @@ export function VersionMenu({ id, locale, current, options }: { id: string; loca
   )
 }
 
+// The same document in another language keeps its place and its query (the Roadmap's filters):
+// the anchor maps to the same heading there, stays when the map has nothing of its own for it
+// (`constructor` is no entry of it), and is dropped when it is missing there or does not decode.
+export function languageHref(option: LanguageOption, search: string, hash: string): string {
+  const id = anchorOf(hash)
+  const at = id && option.anchors && Object.hasOwn(option.anchors, id) ? option.anchors[id] : id
+  return option.href + search + (at ? `#${encodeURIComponent(at)}` : '')
+}
+
 export function LanguageMenu({ id, locale, options }: { id: string; locale: string; options: LanguageOption[] }) {
   const t = strings(locale)
   const label = options.find((o) => o.locale === locale)?.label ?? locale
@@ -102,13 +112,9 @@ export function LanguageMenu({ id, locale, options }: { id: string; locale: stri
               lang={o.locale}
               aria-current={o.locale === locale}
               onClick={(e) => {
-                // The same document in another language keeps its place and its query (the
-                // Roadmap's filters): the anchor maps to the same heading there, or is dropped.
                 if (!o.anchors || (!window.location.hash && !window.location.search)) return
                 e.preventDefault()
-                const id = decodeURIComponent(window.location.hash.slice(1))
-                const at = id ? (o.anchors[id] ?? id) : ''
-                window.location.href = o.href + window.location.search + (at ? `#${encodeURIComponent(at)}` : '')
+                window.location.href = languageHref(o, window.location.search, window.location.hash)
               }}
             >
               {o.label}

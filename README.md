@@ -17,8 +17,12 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 | `pnpm sources` | Resolves each version in `site.config.ts` to one commit and extracts it | `.cache/sources.json`, `.cache/snapshots/<sha>/` |
 | `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap | `public/` (ignored) |
 | `next build` | One HTML page per published document, language and version | `out/` |
+| `pnpm check:export` | `out/` as the host serves it: no address served from two different files, and every address of the site that a page, Markdown file, index or the sitemap names is served or redirected | — |
 
-`pnpm test`, `pnpm typecheck` and `pnpm lint` check the code.
+`pnpm test`, `pnpm typecheck` and `pnpm lint` check the code. `pnpm check:export URL` reads a
+deployment of what `out/` was built from (a Vercel Preview with `VERCEL_AUTOMATION_BYPASS_SECRET`
+set): each address answers with what `out/` holds for it, every address it names answers, a missing
+page answers 404, and each redirect as `vercel.json` says.
 
 ## Sources
 
@@ -55,10 +59,14 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
   README is GitHub's front page, not a page of this site: the manifest keeps it internal, and links
   to it lead to GitHub at the snapshot commit.
 - **URLs.** Pages at `/{lang}/{version}/{route}/`; the Markdown source at
-  `/{lang}/{version}/{route}.md`, the home page's at `index.md`, an HTML document at `.html`;
-  search at `/{lang}/{version}/search.json` (each record names its document and section);
-  `llms.txt` per version and language, by section and group, and at `/llms.txt`;
-  repository images at `/_assets/{sha12}/{path}`.
+  `/{lang}/{version}/{route}.md`, the home page's at `index.md`; an HTML document's own file at
+  `/_html/{lang}/{version}/{route}/`, which its page frames and "View HTML source", `llms.txt` and
+  the `.md` output link (`sourceHref`); search at `/{lang}/{version}/search.json` (each record
+  names its document and section); `llms.txt` per version and language, by section and group, and
+  at `/llms.txt`; repository images at `/_assets/{sha12}/{path}`. The host serves `X.html` at
+  `/X/` and nothing at `X.html`, so an HTML file beside its page would take the page's address; a
+  directory's `index.html` is served at the directory, as every page is. `next dev` serves a
+  public file only at its own name, so there an HTML document's frame stays empty.
 - **Links.** A link to a published document leads to its page in the language being read (in the
   `.md` output, to its `.md` in the document's own language), whatever file it names; only a link
   between two languages of one document (same `translation_group`), its language switch, keeps the
@@ -72,7 +80,10 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
   version in the chosen language, its page shows the original and says so; it never shows another
   document or version. Interface text follows the chosen language.
 - **Languages and anchors.** Switching language keeps the document, its query (the Roadmap's
-  filters) and its place: an anchor maps to the same heading in the other language's file.
+  filters) and its place: an anchor maps to the same heading in the other language's file. An
+  anchor that does not decode (a stray `%`) is dropped, and a name such as `constructor` is no
+  entry of a map: every reader of an anchor (the language menu, the Roadmap's views and its
+  details' links) opens the page as it is.
 - **Redirects.** `vercel.json`, which the host reads before the build, redirects `/` (temporarily)
   to the first version's home in the default language, and the retired `/get-started/` and
   `/architecture/` to `/guide/` and `/reference/`, keeping language and version; a test keeps it
@@ -88,7 +99,8 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
     from the Areas table, status); choices come from the snapshot, and a draft changes nothing
     until applied;
   - a milestone's full plan: its section as written, chosen by the URL's anchor (the source's
-    own anchors, so links into the Roadmap open the right plan);
+    own anchors, so links into the Roadmap open the right plan; an anchor no plan holds
+    chooses none);
   - an item's details, over the others.
   Filters, expanded milestones and the open item live in the URL (`lib/roadmap-view.ts`);
   leaving the timeline for details or a plan keeps its scroll position and focus to come back

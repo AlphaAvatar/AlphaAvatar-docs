@@ -13,7 +13,7 @@ import { unified } from 'unified'
 import { visit } from 'unist-util-visit'
 import { site } from '../site.config'
 import type { Doc } from './manifest'
-import { assetHref, markdownHref, pageByKey, pageHref, repoHref, type DocPage, type Version } from './site'
+import { assetHref, pageByKey, pageHref, repoHref, sourceHref, type DocPage, type Version } from './site'
 import { recordings, terminalLines, terminalText, type Run } from './terminal'
 
 // One parse of a source file gives every representation of it: the HTML tree, the Markdown
@@ -196,7 +196,7 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
       const pageIn = (lang: string) => pageByKey(v, lang, key) as DocPage
       // HTML opens the page in the language being read, Markdown the document in its own language.
       const [read, own] = switchesLanguage(doc, to) ? [pageIn(to.lang), pageIn(to.lang)] : [pageIn(locale), pageIn(doc.lang)]
-      return { html: pageHref(v.id, read.locale, read.route) + at(read.doc), md: site.url + markdownHref(v.id, own.doc) + at(own.doc) }
+      return { html: pageHref(v.id, read.locale, read.route) + at(read.doc), md: site.url + sourceHref(v.id, own.doc) + at(own.doc) }
     }
     if (display || (IMAGE.test(target.file) && !target.directory)) {
       assets.add(target.file)
