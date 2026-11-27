@@ -1970,6 +1970,14 @@ dialog.rm-detail::backdrop {
   }
 }
 
+/* The placeholder the first view waits behind, where the URL names another view than the page is
+   written with (lib/roadmap-view.ts RESTORING): one steady size until the view replaces it. */
+.rm-wait {
+  display: none;
+  min-height: 100vh;
+  align-items: flex-start;
+}
+
 /* With JavaScript the Roadmap shows one view at a time: what it hides carries data-off. */
 @media (scripting: enabled) {
   .rm [data-off] {

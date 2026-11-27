@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from 'react'
 import { strings } from '@/lib/i18n'
-import { isFiltered, parseView, results, sameFilters, statusCounts, viewSearch, type Filters, type View } from '@/lib/roadmap-view'
+import { isFiltered, parseView, RESTORING, results, sameFilters, statusCounts, viewSearch, type Filters, type View } from '@/lib/roadmap-view'
 import { anchorOf } from './navigation'
 
 // The Roadmap's views (Figma "Docs / … / Roadmap"), one at a time:
@@ -98,6 +98,24 @@ function saveReturn(value: Return) {
   } catch {}
 }
 
+// Where the reader was on this URL when the page was left (reload included).
+const scrollKey = () => `docs:roadmap-scroll:${window.location.pathname}${window.location.search}${window.location.hash}`
+
+function readScroll(): number | null {
+  try {
+    const kept = sessionStorage.getItem(scrollKey())
+    return kept === null ? null : Number(kept)
+  } catch {
+    return null
+  }
+}
+
+function saveScroll() {
+  try {
+    sessionStorage.setItem(scrollKey(), String(Math.round(window.scrollY)))
+  } catch {}
+}
+
 // The visible control a return focuses: rows, cards and filter buttons carry `data-focus`.
 function focusOn(key: string, scroll: boolean) {
   const found = [...document.querySelectorAll<HTMLElement>(`[data-focus="${CSS.escape(key)}"]`)].find((e) => e.offsetParent !== null)
@@ -140,6 +158,24 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
   const path = () => window.location.pathname
   const here = (v: View) => path() + viewSearch(v)
   const nothing = { milestone: undefined, area: undefined, state: undefined }
+
+  // The first view, where the page waited for it (lib/roadmap-view.ts RESTORING), is shown once it
+  // is the URL's: hydration renders the page as written, and the URL's view right after. A reload,
+  // or a return from another page, then goes back to where the reader was, which the browser
+  // could not keep while the page waited.
+  useLayoutEffect(() => {
+    const waited = document.getElementById(RESTORING)
+    if (!waited || search !== window.location.search || hash !== window.location.hash) return
+    waited.remove()
+    const how = (performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.type
+    const kept = how === 'reload' || how === 'back_forward' ? readScroll() : null
+    if (kept !== null) jumpTo(kept)
+  }, [search, hash])
+
+  useEffect(() => {
+    window.addEventListener('pagehide', saveScroll)
+    return () => window.removeEventListener('pagehide', saveScroll)
+  }, [])
 
   // Focus moves with the panel: into it on opening, to the results or back to its opener after.
   useEffect(() => {
@@ -410,6 +446,10 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
         <div lang={lang}>{intro}</div>
         <p className="meta">{t.roadmapSource(source)}</p>
       </header>
+
+      <div className="rm-wait">
+        <p className="meta">{t.roadmapRestoring}</p>
+      </div>
 
       <div className="rm-toolbar js-only" data-off={off(kind !== 'timeline' || !!draft)}>
         <button type="button" className="button" data-focus="filters" onClick={openPanel}>

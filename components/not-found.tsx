@@ -5,12 +5,13 @@ import { strings } from '@/lib/i18n'
 import { Lockup } from './brand'
 import { SearchDialog } from './search'
 
-export type KnownVersion = { id: string; label: string; locales: { id: string; label: string }[] }
+// Each language's home is the address the site gives it (lib/site.ts pageHref).
+export type KnownVersion = { id: string; label: string; locales: { id: string; label: string; home: string }[] }
 
 // One static 404 page for every URL; the requested version and language are read from the path,
 // so recovery (search, home) stays in that context.
 export function NotFound({ known, fallbackHome }: { known: KnownVersion[]; fallbackHome: string }) {
-  const [context, setContext] = useState<{ version: KnownVersion; locale: { id: string; label: string } }>()
+  const [context, setContext] = useState<{ version: KnownVersion; locale: KnownVersion['locales'][number] }>()
 
   useEffect(() => {
     const [locale, id] = window.location.pathname.split('/').filter(Boolean)
@@ -21,7 +22,7 @@ export function NotFound({ known, fallbackHome }: { known: KnownVersion[]; fallb
   }, [known])
 
   const t = strings(context?.locale.id ?? 'en')
-  const home = context ? `/${context.locale.id}/${context.version.id}/` : fallbackHome
+  const home = context?.locale.home ?? fallbackHome
 
   return (
     <>

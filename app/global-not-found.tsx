@@ -8,7 +8,7 @@ import './styles.css'
 export const metadata = { title: `Not found · ${site.name}` }
 
 export default function GlobalNotFound() {
-  const known = versions().map((v) => ({ id: v.id, label: v.label, locales: v.locales.map((l) => ({ id: l, label: site.locales[l] ?? l })) }))
+  const known = versions().map((v) => ({ id: v.id, label: v.label, locales: v.locales.map((l) => ({ id: l, label: site.locales[l] ?? l, home: pageHref(v.id, l, '/') })) }))
   const first = versions()[0]
   return (
     <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>

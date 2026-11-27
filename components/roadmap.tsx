@@ -3,6 +3,7 @@ import { visit } from 'unist-util-visit'
 import { strings } from '@/lib/i18n'
 import { sectionTitle } from '@/lib/manifest'
 import { roadmapOf, STATUSES } from '@/lib/roadmap'
+import { restoringScript } from '@/lib/roadmap-view'
 import type { DocPage, Version } from '@/lib/site'
 import { FallbackNotice, Markdown, Pager, SourceLinks } from './article'
 import { Timeline, type MilestoneView } from './timeline'
@@ -60,6 +61,8 @@ export function RoadmapArticle({ v, page }: { v: Version; page: DocPage }) {
     <div className="reading">
       <article className="article roadmap">
         <FallbackNotice v={v} page={page} />
+        {/* Before the Roadmap is read: whether its first view waits for the page's script. */}
+        <script dangerouslySetInnerHTML={{ __html: restoringScript(Object.keys(planOf)) }} />
         <Timeline
           locale={locale}
           lang={lang}

@@ -1,15 +1,21 @@
 // What the host serves from out/, checked before a deployment and after one. The host (Vercel,
-// serving a Next.js export) answers vercel.json's redirects first; it serves a directory's
-// index.html at the directory, `X.html` at `/X/` (`/X` leads there), any other file at its own
-// path, and nothing at an address ending in `.html`.
+// serving a Next.js export) first applies Next's trailing-slash rule: `/x` leads to `/x/` and,
+// where the last segment reads as a file name (`v0.7.0`), `/x.v/` to `/x.v`, both by 308. Then it
+// applies vercel.json's redirects, and then it serves a directory's index.html at the directory,
+// `X.html` where the directory X would be, and any other file at its own path. It serves nothing
+// at an address ending in `.html`.
 //
-//   pnpm check:export        out/ as built: no address is served from two different files, and
-//                            every address of this site that a page, Markdown file, index or the
-//                            sitemap names is served or redirected. `pnpm build` ends with it.
-//   pnpm check:export URL    a deployment of what out/ was built from: each address answers with
-//                            what out/ holds for it, every address its pages name answers, a
-//                            missing one answers 404, and each redirect answers as vercel.json
-//                            says. A protected preview is read with VERCEL_AUTOMATION_BYPASS_SECRET.
+//   pnpm check:export        out/ as built: no address is served from two different files; every
+//                            address of this site that a page, Markdown file, index or the
+//                            sitemap names is served as named, with no redirect; each redirect
+//                            leads in one step to an address that is served. `pnpm build` ends
+//                            with it.
+//   pnpm check:export URL    a deployment of what out/ was built from: each address answers 200
+//                            with what out/ holds for it, and its old form with a slash leads to
+//                            it; every address its pages name answers 200; a missing one answers
+//                            404; each redirect leads as vercel.json says to what out/ holds, in
+//                            one step and with no loop. A protected preview is read with
+//                            VERCEL_AUTOMATION_BYPASS_SECRET.
 
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -19,11 +25,21 @@ import { site } from '../site.config'
 
 export type Redirect = { source: string; destination: string; permanent: boolean }
 
+// Next's trailing-slash rule (next/dist/lib/load-custom-routes.js): where it leads an address.
+const FILE_WITH_SLASH = /^\/(?!\.well-known(?:\/.*)?)(?:[^/]+\/)*[^/]+\.\w+\/$/
+const DIRECTORY_WITHOUT_SLASH = /^\/(?!\.well-known(?:\/.*)?)(?:[^/]+\/)*[^/.]+$/
+
+export function slashRule(address: string): string | undefined {
+  if (FILE_WITH_SLASH.test(address)) return address.slice(0, -1)
+  if (DIRECTORY_WITHOUT_SLASH.test(address)) return `${address}/`
+}
+
 // The address the host serves an exported file at; `file` is relative to out/, with `/`.
 export function servedAt(file: string): string {
-  if (file === 'index.html' || file.endsWith('/index.html')) return `/${file.slice(0, -'index.html'.length)}`
-  if (file.endsWith('.html')) return `/${file.slice(0, -'.html'.length)}/`
-  return `/${file}`
+  if (file === 'index.html') return '/'
+  const directory = file.endsWith('/index.html') ? file.slice(0, -'/index.html'.length) : file.endsWith('.html') ? file.slice(0, -'.html'.length) : undefined
+  if (directory === undefined) return `/${file}`
+  return slashRule(`/${directory}/`) ?? `/${directory}/`
 }
 
 const plain = (address: string) => {
@@ -61,12 +77,35 @@ export function addressesIn(file: string, text: string): string[] {
 // The files whose addresses are checked: pages and the site's own outputs, not Next's payloads.
 const NAMES = (file: string) => /\.(html|md|json|xml)$/.test(file) || file === 'llms.txt' || file.endsWith('/llms.txt')
 
-function redirectRule(source: string) {
-  return new RegExp(`^${source.replace(/:(\w+)(\(([^)]*)\))?/g, (_, _name, _group, choices?: string) => `(${choices ?? '[^/]+'})`)}$`)
+// Where a redirect leads an address, if its source matches it.
+function redirectRule(r: Redirect) {
+  const names: string[] = []
+  const source = new RegExp(`^${r.source.replace(/:(\w+)(\(([^)]*)\))?/g, (_, name: string, _group, choices?: string) => (names.push(name), `(${choices ?? '[^/]+'})`))}$`)
+  return (address: string) => {
+    const m = source.exec(address)
+    return m ? names.reduce((to, name, i) => to.replace(`:${name}`, m[i + 1]), r.destination) : undefined
+  }
 }
 
-export function answered(address: string, served: Set<string>, redirects: Redirect[]) {
-  return served.has(address) || (!address.endsWith('/') && served.has(`${address}/`)) || redirects.some((r) => redirectRule(r.source).test(address))
+const redirectOf = (redirects: Redirect[]) => {
+  const rules = redirects.map((r) => ({ to: redirectRule(r), status: r.permanent ? 308 : 307 }))
+  return (address: string) => {
+    for (const rule of rules) {
+      const to = rule.to(address)
+      if (to) return { status: rule.status, to }
+    }
+  }
+}
+
+// Every way a redirect's source is written: each listed choice, each version for `:version`.
+function instances(r: Redirect): { from: string; to: string; status: number }[] {
+  let found = [{ from: r.source, to: r.destination }]
+  for (const [, name, , choices] of r.source.matchAll(/:(\w+)(\(([^)]*)\))?/g)) {
+    const values = choices?.split('|') ?? (name === 'version' ? site.versions.map((v) => v.id) : [])
+    const param = new RegExp(`:${name}(\\([^)]*\\))?`)
+    found = found.flatMap((f) => values.map((value) => ({ from: f.from.replace(param, value), to: f.to.replace(param, value) })))
+  }
+  return found.map((f) => ({ ...f, status: r.permanent ? 308 : 307 }))
 }
 
 const digest = (body: Buffer) => createHash('sha256').update(body).digest('hex')
@@ -78,7 +117,51 @@ function addresses(files: Map<string, Buffer>) {
   return at
 }
 
-export function checkExport(files: Map<string, Buffer>, redirects: Redirect[]): string[] {
+// One answer: a redirect names where it leads.
+type Step = { status: number; to?: string; body?: Buffer }
+
+// More redirects than this from one address, a loop or an address that is not served ends it.
+export const MAX_HOPS = 5
+
+// The redirects an address leads through, to the first answer that is not one.
+async function trace(address: string, step: (address: string) => Promise<Step>) {
+  const hops: { status: number; to: string }[] = []
+  const seen = new Set([address])
+  for (let at = address; ; ) {
+    const answer = await step(at)
+    if (!answer.to) return { hops, at, answer, end: 'answer' as const }
+    hops.push({ status: answer.status, to: answer.to })
+    if (seen.has(answer.to)) return { hops, at: answer.to, answer, end: 'loop' as const }
+    if (hops.length > MAX_HOPS) return { hops, at: answer.to, answer, end: 'too many' as const }
+    seen.add(answer.to)
+    at = answer.to
+  }
+}
+
+// Each redirect, as the host answers it: past the host's own trailing-slash 308 at most, one step
+// to its destination, which answers 200 (and, at a deployment, with what out/ holds there).
+async function checkRedirects(redirects: Redirect[], step: (address: string) => Promise<Step>, same?: (address: string, body: Buffer) => string | undefined) {
+  const problems: string[] = []
+  for (const r of redirects) {
+    for (const { from, to, status } of instances(r)) {
+      const t = await trace(from, step)
+      const chain = [from, ...t.hops.map((h) => `${h.status} ${h.to}`)].join(' → ')
+      const last = t.hops.at(-1)
+      if (t.end === 'loop') problems.push(`${from} loops: ${chain}`)
+      else if (t.end === 'too many') problems.push(`${from} takes more than ${MAX_HOPS} redirects: ${chain}`)
+      else if (t.answer.status !== 200) problems.push(`${from} ends at ${t.at}, which answers ${t.answer.status}: ${chain}`)
+      else if (!last || last.status !== status || last.to !== to || t.hops.length > 1 + Number(t.hops[0].status === 308 && slashRule(from) === t.hops[0].to)) {
+        problems.push(`${from} answers ${chain}, not ${status} to ${to} and 200 there`)
+      } else {
+        const other = same?.(t.at, t.answer.body!)
+        if (other) problems.push(`${from} leads to ${t.at}, which answers with ${other}`)
+      }
+    }
+  }
+  return problems
+}
+
+export async function checkExport(files: Map<string, Buffer>, redirects: Redirect[]): Promise<string[]> {
   const problems: string[] = []
   const at = addresses(files)
   // Next writes its not-found page twice; files that are the same are one.
@@ -88,17 +171,26 @@ export function checkExport(files: Map<string, Buffer>, redirects: Redirect[]): 
     }
   }
 
-  const served = new Set(at.keys())
-  const missing = new Map<string, string[]>()
+  // The host's answer at an address of out/.
+  const redirect = redirectOf(redirects)
+  const answer = (address: string): Step => {
+    const slash = slashRule(address)
+    if (slash) return { status: 308, to: slash }
+    return redirect(address) ?? (at.has(address) ? { status: 200 } : { status: 404 })
+  }
+
+  const named = new Map<string, string[]>()
   for (const [file, body] of files) {
     if (!NAMES(file)) continue
-    for (const address of addressesIn(file, body.toString('utf8'))) {
-      if (!answered(address, served, redirects)) missing.set(address, [...(missing.get(address) ?? []), file])
-    }
+    for (const address of addressesIn(file, body.toString('utf8'))) if (answer(address).status !== 200) named.set(address, [...(named.get(address) ?? []), file])
   }
-  for (const [address, from] of missing) {
-    problems.push(`${address} is not served, and ${from.length} file(s) name it: ${from.slice(0, 3).join(', ')}${from.length > 3 ? ', …' : ''}`)
+  for (const [address, from] of named) {
+    const a = answer(address)
+    const by = `${from.length} file(s) name it: ${from.slice(0, 3).join(', ')}${from.length > 3 ? ', …' : ''}`
+    problems.push(a.to ? `${address} leads to ${a.to} by ${a.status}, and ${by}; name ${a.to}` : `${address} is not served, and ${by}`)
   }
+
+  problems.push(...(await checkRedirects(redirects, async (address) => answer(address))))
   return problems
 }
 
@@ -120,91 +212,67 @@ const BUILT = (file: string) => file.startsWith('_next/') || (file.endsWith('.tx
 
 async function each<T>(items: T[], run: (item: T) => Promise<void>, at = 8) {
   const queue = [...items]
-  await Promise.all(Array.from({ length: at }, async () => {
-    for (let item = queue.shift(); item !== undefined; item = queue.shift()) await run(item)
-  }))
+  await Promise.all(
+    Array.from({ length: at }, async () => {
+      for (let item = queue.shift(); item !== undefined; item = queue.shift()) await run(item)
+    }),
+  )
 }
 
-// Every way a redirect's source is written: each listed choice, each version for `:version`.
-function instances(r: Redirect): { from: string; to: string }[] {
-  let found = [{ from: r.source, to: r.destination }]
-  for (const [, name, , choices] of r.source.matchAll(/:(\w+)(\(([^)]*)\))?/g)) {
-    const values = choices?.split('|') ?? (name === 'version' ? site.versions.map((v) => v.id) : [])
-    const param = new RegExp(`:${name}(\\([^)]*\\))?`)
-    found = found.flatMap((f) => values.map((value) => ({ from: f.from.replace(param, value), to: f.to.replace(param, value) })))
-  }
-  return found
-}
-
-// What a deployment answers at an address, past the host's own 308 from `X.v/` to `X.v` (a last
-// segment with a dot is read as a file name); `moved` says it took that step.
-type Answer = { response: Response; body: Buffer; moved: boolean }
-
-export async function checkDeployment(base: string, files: Map<string, Buffer>, redirects: Redirect[]): Promise<{ problems: string[]; moved: string[] }> {
+export async function checkDeployment(base: string, files: Map<string, Buffer>, redirects: Redirect[]): Promise<string[]> {
   const problems: string[] = []
-  const moved: string[] = []
   const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET
-  const get = (address: string) => fetch(new URL(encodeURI(address), base), { redirect: 'manual', headers: secret ? { 'x-vercel-protection-bypass': secret } : {} })
-  const answer = async (address: string): Promise<Answer> => {
-    let response = await get(address)
-    const to = response.status === 308 && plain(new URL(response.headers.get('location') ?? '', base).pathname)
-    const slashless = address.endsWith('/') && to === address.slice(0, -1)
-    if (slashless) {
-      await response.arrayBuffer()
-      response = await get(to)
-    }
-    return { response, body: Buffer.from(await response.arrayBuffer()), moved: slashless }
+  const step = async (address: string): Promise<Step> => {
+    const response = await fetch(new URL(encodeURI(address), base), { redirect: 'manual', headers: secret ? { 'x-vercel-protection-bypass': secret } : {} })
+    const body = Buffer.from(await response.arrayBuffer())
+    const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null
+    return { status: response.status, to: location ? plain(new URL(location, base).pathname) : undefined, body }
   }
-  const redirected = (address: string) => redirects.some((r) => redirectRule(r.source).test(address))
-  const named = new Set<string>()
+  const told = (s: Step) => `${s.status}${s.to ? ` to ${s.to}` : ''}`
+  const redirect = redirectOf(redirects)
+  const all = addresses(files)
 
-  const at = [...addresses(files)].filter(([address, served]) => !redirected(address) && !served.some((f) => NOT_FOUND(f) || f.startsWith('_next/')))
+  // Whether what the deployment answered at an address is what out/ holds there: a page by what a
+  // reader sees, any other file byte for byte; else what it is.
+  const same = (address: string, body: Buffer) => {
+    const served = all.get(address) ?? []
+    const matching = served.filter((file) => (file.endsWith('.html') ? visible(body.toString('utf8')) === visible(files.get(file)!.toString('utf8')) : digest(body) === digest(files.get(file)!)))
+    if (!served.length || matching.length !== served.length) return `${matching.length ? matching.join(' and ') : 'something else'}, of ${served.join(' and ') || 'nothing out/ serves'}`
+  }
+
+  const named = new Set<string>()
+  const at = [...all].filter(([address, served]) => !redirect(address) && !served.some((f) => NOT_FOUND(f) || f.startsWith('_next/')))
   // An address out/ serves from two different files must answer with neither: checkExport says why.
   await each(at, async ([address, served]) => {
-    const { response, body, moved: slashless } = await answer(address)
-    if (slashless) moved.push(address)
-    if (response.status !== 200) return void problems.push(`${address} answers ${response.status}, not ${served.join(' or ')}`)
+    const answer = await step(address)
+    if (answer.status !== 200) return void problems.push(`${address} answers ${told(answer)}, not ${served.join(' or ')}`)
     if (BUILT(served[0])) return
-    const same = (file: string) => (file.endsWith('.html') ? visible(body.toString('utf8')) === visible(files.get(file)!.toString('utf8')) : digest(body) === digest(files.get(file)!))
-    const matching = served.filter(same)
-    if (matching.length !== served.length) problems.push(`${address} answers with ${matching.length ? matching.join(' and ') : 'something else'}, of ${served.join(' and ')}`)
-    if (NAMES(served[0])) for (const a of addressesIn(matching[0] ?? served[0], body.toString('utf8'))) named.add(a)
+    const other = same(address, answer.body!)
+    if (other) problems.push(`${address} answers with ${other}`)
+    if (NAMES(served[0])) for (const a of addressesIn(served[0], answer.body!.toString('utf8'))) named.add(a)
+    // A page whose address has no slash was at the one with a slash before: it still leads there.
+    if (served[0].endsWith('index.html') && !address.endsWith('/')) {
+      const old = await step(`${address}/`)
+      if (old.status !== 308 || old.to !== address) problems.push(`${address}/ answers ${told(old)}, not 308 to ${address}`)
+    }
   })
 
   // What the deployed pages and files name beyond out/'s addresses: the build's assets, and any
-  // mistake.
+  // mistake. Each is answered as named.
   const served = new Set(at.map(([address]) => address))
-  await each([...named].filter((a) => !served.has(a) && !redirected(a)), async (address) => {
-    const { response } = await answer(address)
-    if (response.status >= 400) problems.push(`${address}, which the deployment names, answers ${response.status}`)
+  await each([...named].filter((a) => !served.has(a)), async (address) => {
+    const answer = await step(address)
+    if (answer.status !== 200) problems.push(`${address}, which the deployment names, answers ${told(answer)}`)
   })
 
   const missing = `/${site.defaultLocale}/${site.versions[0].id}/no-such-page-${Date.now()}/`
-  const notFound = await answer(missing)
-  if (notFound.response.status !== 404 || visible(notFound.body.toString('utf8')) !== visible(files.get('404.html')?.toString('utf8') ?? '')) {
-    problems.push(`${missing} answers ${notFound.response.status}, not the not-found page with 404`)
+  const notFound = await step(missing)
+  if (notFound.status !== 404 || visible(notFound.body!.toString('utf8')) !== visible(files.get('404.html')?.toString('utf8') ?? '')) {
+    problems.push(`${missing} answers ${told(notFound)}, not the not-found page with 404`)
   }
 
-  // A redirect is reached through the host's own trailing-slash 308s, if any.
-  for (const r of redirects) {
-    const status = r.permanent ? 308 : 307
-    for (const { from, to } of instances(r)) {
-      const hops: string[] = []
-      let address = from
-      for (let hop = 0; hop < 3; hop++) {
-        const response = await get(address)
-        await response.arrayBuffer()
-        const location = response.headers.get('location')
-        if (!location || response.status < 300 || response.status >= 400) break
-        const next = plain(new URL(location, base).pathname)
-        hops.push(`${response.status} ${next}`)
-        if (response.status === status && next === to) break
-        address = next
-      }
-      if (hops.at(-1) !== `${status} ${to}`) problems.push(`${from} answers ${hops.join(' → ') || 'no redirect'}, not ${status} to ${to}`)
-    }
-  }
-  return { problems, moved }
+  problems.push(...(await checkRedirects(redirects, step, same)))
+  return problems
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -215,9 +283,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const files = new Map(list.map((f) => [f, readFileSync(path.join(out, f))]))
   const { redirects } = JSON.parse(readFileSync('vercel.json', 'utf8')) as { redirects: Redirect[] }
   const base = process.argv[2]
-  const { problems, moved } = base ? await checkDeployment(base, files, redirects) : { problems: checkExport(files, redirects), moved: [] }
+  const problems = base ? await checkDeployment(base, files, redirects) : await checkExport(files, redirects)
   for (const p of problems.sort()) console.error(`check-export: ${p}`)
   if (problems.length) process.exit(1)
   console.log(`check-export: ${base ?? 'out/'}: ${addresses(files).size} addresses from ${files.size} files, as the host serves them`)
-  if (moved.length) console.log(`check-export: ${moved.length} reached by the host's 308 to the address without its slash: ${moved.sort().join(', ')}`)
 }

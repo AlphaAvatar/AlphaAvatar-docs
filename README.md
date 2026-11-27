@@ -17,12 +17,14 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 | `pnpm sources` | Resolves each version in `site.config.ts` to one commit and extracts it | `.cache/sources.json`, `.cache/snapshots/<sha>/` |
 | `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap | `public/` (ignored) |
 | `next build` | One HTML page per published document, language and version | `out/` |
-| `pnpm check:export` | `out/` as the host serves it: no address served from two different files, and every address of the site that a page, Markdown file, index or the sitemap names is served or redirected | — |
+| `pnpm check:export` | `out/` as the host serves it: no address served from two different files; every address of the site that a page, Markdown file, index or the sitemap names is served as named, with no redirect; each redirect leads in one step to an address that is served | — |
 
 `pnpm test`, `pnpm typecheck` and `pnpm lint` check the code. `pnpm check:export URL` reads a
-deployment of what `out/` was built from (a Vercel Preview with `VERCEL_AUTOMATION_BYPASS_SECRET`
-set): each address answers with what `out/` holds for it, every address it names answers, a missing
-page answers 404, and each redirect as `vercel.json` says.
+deployment of what `out/` was built from (a protected one with `VERCEL_AUTOMATION_BYPASS_SECRET`
+set): each address answers 200 with what `out/` holds for it, and its old form with a slash leads
+there; every address it names answers 200; a missing page answers 404; each redirect leads as
+`vercel.json` says, past the host's own slash redirect, in one step and with no loop, to what
+`out/` holds there.
 
 ## Sources
 
@@ -58,7 +60,10 @@ page answers 404, and each redirect as `vercel.json` says.
   documents; a missing one stops the build. No document may take the route `/`. The repository's
   README is GitHub's front page, not a page of this site: the manifest keeps it internal, and links
   to it lead to GitHub at the snapshot commit.
-- **URLs.** Pages at `/{lang}/{version}/{route}/`; the Markdown source at
+- **URLs.** Pages at `/{lang}/{version}/{route}/`, without the slash where the last segment reads
+  as a file name (`/en/v0.7.0`, `/en/v0.7.0/releases/v0.6.9`): the host and `next dev` apply
+  Next's trailing-slash rule, which leads the address with a slash there by a 308, so every link,
+  menu, canonical and sitemap entry names it so (`pageHref`); the Markdown source at
   `/{lang}/{version}/{route}.md`, the home page's at `index.md`; an HTML document's own file at
   `/_html/{lang}/{version}/{route}/`, which its page frames and "View HTML source", `llms.txt` and
   the `.md` output link (`sourceHref`); search at `/{lang}/{version}/search.json` (each record
@@ -66,7 +71,8 @@ page answers 404, and each redirect as `vercel.json` says.
   at `/llms.txt`; repository images at `/_assets/{sha12}/{path}`. The host serves `X.html` at
   `/X/` and nothing at `X.html`, so an HTML file beside its page would take the page's address; a
   directory's `index.html` is served at the directory, as every page is. `next dev` serves a
-  public file only at its own name, so there an HTML document's frame stays empty.
+  public file only at its own name; a rewrite of its own (`next.config.ts`, development only)
+  serves the directory there too.
 - **Links.** A link to a published document leads to its page in the language being read (in the
   `.md` output, to its `.md` in the document's own language), whatever file it names; only a link
   between two languages of one document (same `translation_group`), its language switch, keeps the
@@ -85,7 +91,8 @@ page answers 404, and each redirect as `vercel.json` says.
   entry of a map: every reader of an anchor (the language menu, the Roadmap's views and its
   details' links) opens the page as it is.
 - **Redirects.** `vercel.json`, which the host reads before the build, redirects `/` (temporarily)
-  to the first version's home in the default language, and the retired `/get-started/` and
+  to the first version's home in the default language, at the address it is served at, so one
+  redirect reaches it, and the retired `/get-started/` and
   `/architecture/` to `/guide/` and `/reference/`, keeping language and version; a test keeps it
   in step with `site.config.ts`.
 - **Versions.** Switching version keeps the document (by translation group or id); if the target
@@ -105,8 +112,12 @@ page answers 404, and each redirect as `vercel.json` says.
   Filters, expanded milestones and the open item live in the URL (`lib/roadmap-view.ts`);
   leaving the timeline for details or a plan keeps its scroll position and focus to come back
   to, by the back button or the browser's. Every anchor the source defines stays on the page; a
-  row or milestone that does not follow the format stops the build. Without JavaScript every
-  milestone, item and plan is shown. Its `.md` output and search text are those of any document.
+  row or milestone that does not follow the format stops the build. The page is written as the
+  timeline; where the URL names another view (filters, an expanded milestone, a full plan's
+  anchor), a script ahead of the Roadmap holds it behind a placeholder of one steady size until
+  the page shows that view, never the timeline first, and a reload or a return then goes back to
+  where the reader was. Without JavaScript nothing waits, and every milestone, item and plan is
+  shown. Its `.md` output and search text are those of any document.
 - **Code blocks.** A block's kind comes from what the source says it is, never from its words:
   ```` ```terminal NAME ```` shows recording NAME of the repository's `docs/cli/cli-output.json`
   in its recorded colors (the data's palette for 4-bit codes, 256-color and RGB codes as recorded;
