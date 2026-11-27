@@ -1,13 +1,16 @@
 // Write the outputs that sit beside the HTML pages, from the snapshots `pnpm sources` pinned:
 // each document's Markdown (or HTML) source with links rewritten, the displayed repository
 // assets, search indexes, llms.txt files and the sitemap. Nothing is written when a link or
-// anchor does not resolve.
+// anchor does not resolve, or the Roadmap does not follow its format.
 
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { site } from '../site.config'
+import { homeMarkdown, homeModel } from '../lib/home'
+import { sectionTitle } from '../lib/manifest'
 import { htmlSections, renderDocument } from '../lib/markdown'
-import { allLocales, assetHref, llmsHref, markdownHref, nav, pageHref, searchHref, versions } from '../lib/site'
+import { roadmapOf } from '../lib/roadmap'
+import { allLocales, assetHref, homeMarkdownHref, llmsHref, markdownHref, nav, pageHref, searchHref, versions } from '../lib/site'
 
 const PUBLIC = path.join(process.cwd(), 'public')
 const files = new Map<string, string | { copy: string }>()
@@ -25,16 +28,21 @@ for (const v of versions()) {
     }
     const rendered = renderDocument(v, doc, doc.lang)
     problems.push(...rendered.problems)
-    for (const link of rendered.links) {
-      if (link.doc.format !== 'html' && !renderDocument(v, link.doc, link.doc.lang).anchors.includes(link.fragment)) {
-        problems.push(`${doc.path}: #${link.fragment} is not an anchor of ${link.doc.path}`)
-      }
-    }
     out(markdownHref(v.id, doc), rendered.markdown)
     for (const asset of rendered.assets) out(assetHref(sha, asset), { copy: path.join(v.source.root, asset) })
   }
 
   for (const locale of v.locales) {
+    // Every page as it is read in this language: its links and anchors must resolve too.
+    for (const g of nav(v, locale)) for (const p of g.pages) if (p.doc.format !== 'html') problems.push(...renderDocument(v, p.doc, locale).problems)
+    // The Roadmap page reads its milestones and items from the source; what it cannot read stops here.
+    for (const g of nav(v, locale)) for (const p of g.pages) if (p.doc.type === 'roadmap') problems.push(...roadmapOf(v, p.doc, locale).problems)
+    try {
+      out(homeMarkdownHref(v.id, locale), homeMarkdown(homeModel(v, locale)))
+    } catch (error) {
+      problems.push((error as Error).message)
+    }
+
     const groups = nav(v, locale)
     const records = groups.flatMap((g) =>
       g.pages.flatMap((page) => {
@@ -43,7 +51,7 @@ for (const v of versions()) {
           href: pageHref(v.id, locale, page.route) + (s.anchor ? `#${s.anchor}` : ''),
           title: page.doc.title,
           heading: s.heading,
-          section: g.section.title,
+          section: sectionTitle(g.section, locale),
           lang: page.doc.lang,
           path: page.doc.path,
           text: s.text,
@@ -58,8 +66,10 @@ for (const v of versions()) {
       `> ${site.repository} at ${v.source.ref} ${sha}. Each link is the Markdown source of one page; ` +
         'a page without a version in this language links its original language.',
       '',
+      `Home: ${site.url}${homeMarkdownHref(v.id, locale)}`,
+      '',
       ...groups.flatMap((g) => [
-        `## ${g.section.title}`,
+        `## ${sectionTitle(g.section, locale)}`,
         '',
         ...g.pages.map((p) => `- [${p.doc.title}](${site.url}${markdownHref(v.id, p.doc)}): ${p.doc.path}${p.doc.lang === locale ? '' : ` (${p.doc.lang})`}`),
         '',

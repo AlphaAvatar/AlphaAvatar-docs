@@ -109,7 +109,11 @@ export function SearchDialog({ indexUrl, locale, context }: { indexUrl: string; 
   const results = useMemo(() => (records ? rank(records, query) : []), [records, query])
 
   function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    // A search field would take the first Esc to clear itself; Esc always closes the overlay.
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      dialog.current?.close()
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
       const next = (active + (e.key === 'ArrowDown' ? 1 : -1) + results.length) % Math.max(results.length, 1)
       setActive(next)
@@ -133,13 +137,7 @@ export function SearchDialog({ indexUrl, locale, context }: { indexUrl: string; 
           : ''
 
   return (
-    <dialog ref={dialog} className="modal" aria-labelledby="search-title" onClick={(e) => e.target === dialog.current && dialog.current.close()}>
-      <div className="dialog-head">
-        <h2 id="search-title">{t.searchTitle}</h2>
-        <button type="button" className="button small" onClick={() => dialog.current?.close()}>
-          {t.close}
-        </button>
-      </div>
+    <dialog ref={dialog} className="modal search" aria-label={t.searchTitle} onClick={(e) => e.target === dialog.current && dialog.current.close()}>
       <div className="search-field">
         <img src="/icons/search.svg" width={20} height={20} alt="" />
         <input
@@ -157,6 +155,9 @@ export function SearchDialog({ indexUrl, locale, context }: { indexUrl: string; 
           onKeyDown={onKeyDown}
           autoComplete="off"
         />
+        <button type="button" className="button small" onClick={() => dialog.current?.close()}>
+          {t.close}
+        </button>
       </div>
       <div className="chips" style={{ marginTop: 12 }}>
         {context.map((c) => (

@@ -1,10 +1,14 @@
 import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { site } from '@/site.config'
-import { DocArticle, Home, SectionIndex } from '@/components/article'
+import { DocArticle, SectionIndex } from '@/components/article'
+import { Home } from '@/components/home'
+import { RoadmapArticle } from '@/components/roadmap'
 import { Shell } from '@/components/shell'
+import { homeModel } from '@/lib/home'
+import { sectionTitle } from '@/lib/manifest'
 import { renderDocument } from '@/lib/markdown'
-import { markdownHref, pageByKey, pageHref, pageOf, version, versions } from '@/lib/site'
+import { homeMarkdownHref, markdownHref, pageByKey, pageHref, pageOf, version, versions } from '@/lib/site'
 
 type Params = { locale: string; version: string; slug?: string[] }
 
@@ -25,14 +29,16 @@ function resolve({ locale, version: id, slug }: Params) {
 
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { v, page } = resolve(await params)
-  const title = page.kind === 'doc' ? (page.route === '/' ? site.name : `${page.doc.title} · ${site.name}`) : `${page.section.title} · ${site.name}`
+  const title =
+    page.kind === 'home' ? site.name : `${page.kind === 'doc' ? page.doc.title : sectionTitle(page.section, page.locale)} · ${site.name}`
+  const markdown = page.kind === 'home' ? homeMarkdownHref(v.id, page.locale) : page.kind === 'doc' && page.doc.format !== 'html' ? markdownHref(v.id, page.doc) : undefined
   const languages = Object.fromEntries(v.locales.map((l) => [l, pageHref(v.id, l, pageByKey(v, l, page.key)!.route)]))
   return {
     title,
     alternates: {
       canonical: pageHref(v.id, page.locale, page.route),
       languages,
-      ...(page.kind === 'doc' && page.doc.format !== 'html' && { types: { 'text/markdown': markdownHref(v.id, page.doc) } }),
+      ...(markdown && { types: { 'text/markdown': markdown } }),
     },
   }
 }
@@ -46,10 +52,17 @@ export default async function Page({ params }: { params: Promise<Params> }) {
       </Shell>
     )
   }
-  if (page.route === '/') {
+  if (page.kind === 'home') {
     return (
       <Shell v={v} page={page} entries={[]} wide>
-        <Home v={v} page={page} />
+        <Home model={homeModel(v, page.locale)} />
+      </Shell>
+    )
+  }
+  if (page.doc.type === 'roadmap') {
+    return (
+      <Shell v={v} page={page} entries={[]}>
+        <RoadmapArticle v={v} page={page} />
       </Shell>
     )
   }

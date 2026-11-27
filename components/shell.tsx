@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { site } from '@/site.config'
 import { strings } from '@/lib/i18n'
+import { sectionTitle } from '@/lib/manifest'
 import { nav, pageByKey, pageHref, searchHref, sectionEntry, versions, type Page, type Version } from '@/lib/site'
 import { Lockup } from './brand'
 import { LanguageMenu, VersionMenu, type LanguageOption, type VersionOption } from './menus'
@@ -12,8 +13,8 @@ export const localeLabel = (locale: string) => site.locales[locale] ?? locale
 function navData(v: Version, locale: string): NavGroupData[] {
   return nav(v, locale).map((g) => ({
     id: g.section.id,
-    title: g.section.title,
-    index: g.index && { key: g.index.key, title: g.section.title, href: pageHref(v.id, locale, g.index.route) },
+    title: sectionTitle(g.section, locale),
+    index: g.index && { key: g.index.key, title: sectionTitle(g.section, locale), href: pageHref(v.id, locale, g.index.route) },
     items: g.pages.map((p) => ({
       key: p.key,
       title: p.doc.title,
@@ -71,7 +72,7 @@ export function Shell({ v, page, entries, wide, children }: { v: Version; page: 
             const section = v.manifest.sections.find((s) => s.id === id)
             return entry && section ? (
               <a key={id} href={pageHref(v.id, locale, entry.route)}>
-                {section.title}
+                {sectionTitle(section, locale)}
               </a>
             ) : null
           })}

@@ -18,7 +18,7 @@ export function VersionMenu({ id, locale, current, options }: { id: string; loca
   return (
     <>
       <button type="button" className="button" popoverTarget={id} aria-label={`${t.version}: ${label}`}>
-        {label}
+        {t.docs} {label}
       </button>
       <div id={id} popover="auto" className="menu" role="dialog" aria-label={t.version}>
         <div className="menu-head">

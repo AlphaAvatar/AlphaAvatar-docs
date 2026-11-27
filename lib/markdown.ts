@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import GithubSlugger from 'github-slugger'
 import type { Root as HastRoot } from 'hast'
-import type { Nodes, Root } from 'mdast'
+import type { Nodes, Root, RootContent } from 'mdast'
 import { toString } from 'mdast-util-to-string'
 import rehypeRaw from 'rehype-raw'
 import rehypeSanitize, { defaultSchema, type Options as Schema } from 'rehype-sanitize'
@@ -13,7 +13,7 @@ import { unified } from 'unified'
 import { visit } from 'unist-util-visit'
 import { site } from '../site.config'
 import type { Doc } from './manifest'
-import { assetHref, markdownHref, pageByKey, pageHref, repoHref, type Version } from './site'
+import { assetHref, markdownHref, pageByKey, pageHref, repoHref, type DocPage, type Version } from './site'
 
 // One parse of a source file gives every representation of it: the HTML tree, the Markdown
 // output (the source text with only its link targets changed), the contents and the search text.
@@ -22,17 +22,15 @@ export type Heading = { depth: number; id: string; text: string }
 export type SearchSection = { anchor: string; heading: string; text: string }
 
 export type Rendered = {
+  // The parsed source with its links rewritten for the language being read and its heading ids.
+  tree: Root
   hast: HastRoot
   headings: Heading[]
   markdown: string
   sections: SearchSection[]
   // Repository files the page displays; the build copies them into the site.
   assets: string[]
-  // Every id a link can target: headings and ids written in HTML.
-  anchors: string[]
-  // Links into other published documents, for the build's anchor check.
-  links: { doc: Doc; fragment: string }[]
-  // Links that resolve to nothing in the snapshot; they are left as written.
+  // Links that resolve to nothing in the snapshot, or name an anchor the linked page lacks.
   problems: string[]
 }
 
@@ -66,6 +64,9 @@ const schema: Schema = {
 const parser = unified().use(remarkParse).use(remarkGfm)
 const toHast = unified().use(remarkRehype, { allowDangerousHtml: true }).use(rehypeRaw).use(rehypeSanitize, schema)
 
+// The HTML of part of a rendered tree, by the same rules as the whole document.
+export const htmlOf = (nodes: RootContent[]): HastRoot => toHast.runSync({ type: 'root', children: nodes }) as HastRoot
+
 function resolve(v: Version, from: string, url: string): Target {
   if (!url || url.startsWith('#') || /^[a-z][a-z0-9+.-]*:|^\/\//i.test(url)) return { kind: 'keep' }
   const hash = url.indexOf('#')
@@ -87,12 +88,48 @@ function resolve(v: Version, from: string, url: string): Target {
   }
 }
 
-// A link to another language of a document that also exists in the linking document's own
-// language names that language on purpose (a language switch, a translation listed by name), so
-// it keeps it. Any other link to a document follows the language being read.
-function namesLanguage(v: Version, from: Doc, to: Doc): boolean {
-  const group = to.translation_group
-  return !!group && to.lang !== from.lang && [...v.docs.values()].some((d) => d.translation_group === group && d.lang === from.lang)
+// A link between two languages of the same document is its language switch and keeps the
+// language it names. Any other link to a document follows the language being read.
+const switchesLanguage = (from: Doc, to: Doc) => !!to.translation_group && to.translation_group === from.translation_group && to.lang !== from.lang
+
+// Every place a link into a document can name: its headings in order and the ids its HTML writes.
+type Outline = { headings: Heading[]; ids: Set<string> }
+
+const outlines = new Map<string, Outline>()
+
+function headingIds(tree: Root): Heading[] {
+  const slugger = new GithubSlugger()
+  const headings: Heading[] = []
+  visit(tree, 'heading', (node) => {
+    const text = toString(node, { includeHtml: false })
+    headings.push({ depth: node.depth, id: slugger.slug(text), text })
+  })
+  return headings
+}
+
+export function outline(v: Version, doc: Doc): Outline {
+  const key = `${v.id}|${doc.path}`
+  let found = outlines.get(key)
+  if (!found) {
+    const source = readFileSync(path.join(v.source.root, doc.path), 'utf8')
+    const ids = new Set([...source.matchAll(/\b(?:id|name)="([^"]+)"/g)].map((m) => m[1]))
+    const headings = doc.format === 'html' ? [] : headingIds(parser.parse(source) as Root)
+    for (const h of headings) ids.add(h.id)
+    outlines.set(key, (found = { headings, ids }))
+  }
+  return found
+}
+
+// The anchor in `doc` of the place `id` names in `named`, another language of the same document:
+// the same id when `doc` has it, else the heading at the same position, since a translation keeps
+// its source's headings in order (the source repository checks this).
+function anchorIn(v: Version, named: Doc, id: string, doc: Doc): string | undefined {
+  const target = outline(v, doc)
+  if (target.ids.has(id)) return id
+  const source = outline(v, named)
+  const at = source.headings.findIndex((h) => h.id === id)
+  const same = source.headings.length === target.headings.length && source.headings.every((h, i) => h.depth === target.headings[i].depth)
+  return at >= 0 && same ? target.headings[at].id : undefined
 }
 
 function plain(node: Nodes): string {
@@ -115,8 +152,6 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
   const source = readFileSync(path.join(v.source.root, doc.path), 'utf8')
   const tree = parser.parse(source) as Root
   const assets = new Set<string>()
-  const anchors = new Set<string>()
-  const links: Rendered['links'] = []
   const problems: string[] = []
   const edits: { start: number; end: number; text: string }[] = []
 
@@ -129,15 +164,17 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
     }
     if (target.kind === 'doc') {
       const { doc: to, fragment } = target
-      if (fragment) links.push({ doc: to, fragment: fragment.slice(1) })
-      const key = to.translation_group ?? to.id
-      if (namesLanguage(v, doc, to)) {
-        return { html: pageHref(v.id, to.lang, pageByKey(v, to.lang, key)!.route) + fragment, md: site.url + markdownHref(v.id, to) + fragment }
+      const at = (shown: Doc) => {
+        if (!fragment) return ''
+        const id = anchorIn(v, to, fragment.slice(1), shown)
+        if (id === undefined) problems.push(`${doc.path}: ${url}: ${shown.path} has no anchor for ${fragment}`)
+        return `#${id ?? fragment.slice(1)}`
       }
-      const read = pageByKey(v, locale, key)!
-      const own = pageByKey(v, doc.lang, key)!
-      if (own.kind !== 'doc') return undefined
-      return { html: pageHref(v.id, locale, read.route) + fragment, md: site.url + markdownHref(v.id, own.doc) + fragment }
+      const key = to.translation_group ?? to.id
+      const pageIn = (lang: string) => pageByKey(v, lang, key) as DocPage
+      // HTML opens the page in the language being read, Markdown the document in its own language.
+      const [read, own] = switchesLanguage(doc, to) ? [pageIn(to.lang), pageIn(to.lang)] : [pageIn(locale), pageIn(doc.lang)]
+      return { html: pageHref(v.id, read.locale, read.route) + at(read.doc), md: site.url + markdownHref(v.id, own.doc) + at(own.doc) }
     }
     if (display || (IMAGE.test(target.file) && !target.directory)) {
       assets.add(target.file)
@@ -153,18 +190,13 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
     else edits.push({ start: start + at, end: start + at + from.length, text: to })
   }
 
-  const slugger = new GithubSlugger()
-  const headings: Heading[] = []
+  const headings = headingIds(tree)
+  let next = 0
   visit(tree, (node) => {
     if (node.type === 'heading') {
-      const text = toString(node, { includeHtml: false })
-      const id = slugger.slug(text)
-      node.data = { ...node.data, hProperties: { ...node.data?.hProperties, id } }
-      headings.push({ depth: node.depth, id, text })
-      anchors.add(id)
+      node.data = { ...node.data, hProperties: { ...node.data?.hProperties, id: headings[next++].id } }
       return
     }
-    if (node.type === 'html') for (const m of node.value.matchAll(/\b(?:id|name)="([^"]+)"/g)) anchors.add(m[1])
     if (node.type !== 'link' && node.type !== 'image' && node.type !== 'definition' && node.type !== 'html') return
     const start = node.position!.start.offset!
     const written = source.slice(start, node.position!.end.offset!)
@@ -216,13 +248,12 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
   for (const s of sections) s.text = s.text.replace(/\s+/g, ' ').trim()
 
   const rendered: Rendered = {
+    tree,
     hast: toHast.runSync(tree) as HastRoot,
     headings: headings.filter((h) => h.depth === 2 || h.depth === 3),
     markdown,
     sections,
     assets: [...assets],
-    anchors: [...anchors],
-    links,
     problems,
   }
   cache.set(cacheKey, rendered)

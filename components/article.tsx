@@ -2,42 +2,48 @@ import type { Element, ElementContent, Root } from 'hast'
 import { toJsxRuntime, type Components } from 'hast-util-to-jsx-runtime'
 import { toString } from 'hast-util-to-string'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
-import { site } from '@/site.config'
 import { strings } from '@/lib/i18n'
+import { sectionTitle } from '@/lib/manifest'
 import { renderDocument } from '@/lib/markdown'
 import {
   editHref,
-  latestRelease,
   markdownHref,
-  nav,
   neighbours,
   pageByKey,
   pageHref,
   repoHref,
-  sectionEntry,
   type DocPage,
   type SectionPage,
   type Version,
 } from '@/lib/site'
 import { CopyButton } from './copy'
+import { Diagram } from './diagram'
 import { Toc } from './navigation'
 import { localeLabel } from './shell'
 
 const SHELL = new Set(['bash', 'sh', 'shell', 'console', 'zsh', 'shellsession'])
 
-// The source's HTML tree as React; code blocks get a copy control outside their scrolling area
-// and tables scroll in their own region.
-function Markdown({ hast, locale }: { hast: Root; locale: string }) {
+// The source's HTML tree as React; code blocks get a copy control outside their scrolling area,
+// tables scroll in their own region and Mermaid blocks are drawn once the page runs.
+export function Markdown({ hast, locale }: { hast: Root; locale: string }) {
   const t = strings(locale)
   const components: Partial<Components> = {
     pre: ({ node, ...props }) => {
       const code = node?.children.find((c: ElementContent): c is Element => c.type === 'element' && c.tagName === 'code')
       const lang = (code?.properties.className as string[] | undefined)?.find((c) => c.startsWith('language-'))?.slice(9)
+      const text = toString(node!).replace(/\n$/, '')
+      if (lang === 'mermaid') {
+        return (
+          <Diagram code={text} locale={locale}>
+            <pre {...props} />
+          </Diagram>
+        )
+      }
       return (
         <div className="code-block">
           <div className="code-toolbar">
             <span>{lang ? (SHELL.has(lang) ? t.terminal : lang) : ''}</span>
-            <CopyButton text={toString(node!).replace(/\n$/, '')} label={t.copyCode} locale={locale} />
+            <CopyButton text={text} label={t.copyCode} locale={locale} />
           </div>
           <pre {...props} />
         </div>
@@ -56,7 +62,7 @@ function Markdown({ hast, locale }: { hast: Root; locale: string }) {
   return toJsxRuntime(hast, { Fragment, jsx, jsxs, passNode: true, components })
 }
 
-function FallbackNotice({ v, page }: { v: Version; page: DocPage }) {
+export function FallbackNotice({ v, page }: { v: Version; page: DocPage }) {
   if (page.doc.lang === page.locale) return null
   const t = strings(page.locale)
   const original = pageByKey(v, page.doc.lang, page.key)!
@@ -75,7 +81,7 @@ function FallbackNotice({ v, page }: { v: Version; page: DocPage }) {
   )
 }
 
-function SourceLinks({ v, page }: { v: Version; page: DocPage }) {
+export function SourceLinks({ v, page }: { v: Version; page: DocPage }) {
   const t = strings(page.locale)
   const edit = editHref(page.doc.path)
   return (
@@ -89,6 +95,25 @@ function SourceLinks({ v, page }: { v: Version; page: DocPage }) {
         </>
       )}
     </div>
+  )
+}
+
+export function Pager({ v, page }: { v: Version; page: DocPage }) {
+  const t = strings(page.locale)
+  const { previous, next } = neighbours(v, page)
+  return (
+    <nav className="pager" aria-label={`${t.previous} / ${t.next}`}>
+      {previous && (
+        <a className="button" href={pageHref(v.id, page.locale, previous.route)} rel="prev">
+          {t.previous}: {previous.doc.title}
+        </a>
+      )}
+      {next && (
+        <a className="button" href={pageHref(v.id, page.locale, next.route)} rel="next">
+          {t.next}: {next.doc.title}
+        </a>
+      )}
+    </nav>
   )
 }
 
@@ -107,7 +132,6 @@ export function DocArticle({ v, page }: { v: Version; page: DocPage }) {
   const { doc, locale } = page
   const t = strings(locale)
   const rendered = doc.format === 'html' ? undefined : renderDocument(v, doc, locale)
-  const { previous, next } = neighbours(v, page)
   const status = t.status[doc.status]
 
   return (
@@ -116,7 +140,7 @@ export function DocArticle({ v, page }: { v: Version; page: DocPage }) {
         <FallbackNotice v={v} page={page} />
         <PageActions v={v} page={page} />
         <div>
-          <p className="eyebrow">{page.section.title}</p>
+          <p className="eyebrow">{sectionTitle(page.section, page.locale)}</p>
           <p className="meta">
             {t.snapshot(v.label, v.source.sha.slice(0, 8))} · {page.doc.lang === locale ? localeLabel(doc.lang) : t.original(localeLabel(doc.lang))}
           </p>
@@ -139,18 +163,7 @@ export function DocArticle({ v, page }: { v: Version; page: DocPage }) {
           </>
         )}
         <hr className="divider" />
-        <nav className="pager" aria-label={`${t.previous} / ${t.next}`}>
-          {previous && (
-            <a className="button" href={pageHref(v.id, locale, previous.route)} rel="prev">
-              {t.previous}: {previous.doc.title}
-            </a>
-          )}
-          {next && (
-            <a className="button" href={pageHref(v.id, locale, next.route)} rel="next">
-              {t.next}: {next.doc.title}
-            </a>
-          )}
-        </nav>
+        <Pager v={v} page={page} />
         <p className="meta">{t.maintained}</p>
         <hr className="divider" />
         <SourceLinks v={v} page={page} />
@@ -174,7 +187,7 @@ export function SectionIndex({ v, page }: { v: Version; page: SectionPage }) {
       <div className="article">
         <div>
           <p className="eyebrow">{t.sectionOverview}</p>
-          <h1 className="page-title">{page.section.title}</h1>
+          <h1 className="page-title">{sectionTitle(page.section, page.locale)}</h1>
           <p className="meta">
             {t.snapshot(v.label, v.source.sha.slice(0, 8))} · {t.documents(page.pages.length)}
           </p>
@@ -194,83 +207,6 @@ export function SectionIndex({ v, page }: { v: Version; page: SectionPage }) {
             </a>
           ))}
         </div>
-      </div>
-    </div>
-  )
-}
-
-export function Home({ v, page }: { v: Version; page: DocPage }) {
-  const { locale } = page
-  const t = strings(locale)
-  const release = latestRelease(v, locale)
-  const groups = nav(v, locale)
-  const rendered = renderDocument(v, page.doc, locale)
-
-  return (
-    <div className="home">
-      {release?.doc.release && (
-        <section className="spotlight">
-          <div style={{ flex: 1 }}>
-            <span className="tag">{t.latestRelease}</span>
-            <h1>AlphaAvatar {release.doc.release.tag}</h1>
-            <p className="meta">{t.published(release.doc.release.published)}</p>
-          </div>
-          <a className="button primary" href={pageHref(v.id, locale, release.route)}>
-            {t.releaseNotes}
-          </a>
-        </section>
-      )}
-      <div className="cards portals">
-        {site.header.map((id) => {
-          const group = groups.find((g) => g.section.id === id)
-          const entry = sectionEntry(v, locale, id)
-          if (!group || !entry) return null
-          return (
-            <section key={id} className="card portal">
-              <span className="eyebrow">{t.documents(group.pages.length)}</span>
-              <div>
-                <h2>
-                  <a href={pageHref(v.id, locale, entry.route)} style={{ color: 'inherit' }}>
-                    {group.section.title}
-                  </a>
-                </h2>
-                <ul>
-                  {group.pages.slice(0, 4).map((p) => (
-                    <li key={p.key}>
-                      <a href={pageHref(v.id, locale, p.route)} lang={p.doc.lang}>
-                        {p.doc.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </section>
-          )
-        })}
-      </div>
-      <section>
-        <h2 className="home-heading">{t.allSections}</h2>
-        <ul className="section-rows">
-          {groups
-            .filter((g) => g.pages.some((p) => p.route !== '/'))
-            .map((g) => (
-              <li key={g.section.id}>
-                <a href={pageHref(v.id, locale, sectionEntry(v, locale, g.section.id)!.route)}>
-                  <span>{g.section.title}</span>
-                  <span className="meta">{t.documents(g.pages.length)}</span>
-                </a>
-              </li>
-            ))}
-        </ul>
-      </section>
-      <div className="home-readme article" style={{ padding: 0 }}>
-        <FallbackNotice v={v} page={page} />
-        <PageActions v={v} page={page} />
-        <div className="prose" lang={page.doc.lang}>
-          <Markdown hast={rendered.hast} locale={locale} />
-        </div>
-        <hr className="divider" />
-        <SourceLinks v={v} page={page} />
       </div>
     </div>
   )

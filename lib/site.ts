@@ -19,7 +19,11 @@ export type DocPage = {
 // A section without a document at /<section id> lists its documents there.
 export type SectionPage = { kind: 'section'; key: string; locale: string; route: string; section: Section; pages: DocPage[] }
 
-export type Page = DocPage | SectionPage
+// The landing page at / of every version and language; the site writes it (lib/home.ts).
+// Its key cannot be a manifest id or translation group (README's id is `home`).
+export type HomePage = { kind: 'home'; key: ':home'; locale: string; route: '/' }
+
+export type Page = DocPage | SectionPage | HomePage
 
 export type NavGroup = { section: Section; index?: SectionPage; pages: DocPage[] }
 
@@ -55,8 +59,9 @@ function buildPages(manifest: Manifest, locale: string): Page[] {
   })
   docs.sort((a, b) => sectionRank(a.section.id) - sectionRank(b.section.id) || a.doc.order - b.doc.order || a.doc.id.localeCompare(b.doc.id))
 
-  const routes = new Set<string>()
+  const routes = new Set<string>(['/'])
   for (const page of docs) {
+    if (page.route === '/') throw new Error(`manifest: ${page.doc.id} has route /, which is the site's home page`)
     if (routes.has(page.route)) throw new Error(`manifest: route ${page.route} repeats in ${locale}`)
     routes.add(page.route)
   }
@@ -64,10 +69,10 @@ function buildPages(manifest: Manifest, locale: string): Page[] {
   const indexes: SectionPage[] = manifest.sections.flatMap((section) => {
     const pages = docs.filter((p) => p.section.id === section.id)
     const route = `/${section.id}`
-    if (routes.has(route) || !pages.some((p) => p.route !== '/')) return []
+    if (routes.has(route) || !pages.length) return []
     return [{ kind: 'section', key: `section:${section.id}`, locale, route, section, pages }]
   })
-  return [...docs, ...indexes]
+  return [{ kind: 'home', key: ':home', locale, route: '/' }, ...docs, ...indexes]
 }
 
 export function loadVersion(source: Snapshot): Version {
@@ -125,8 +130,9 @@ export function latestRelease(v: Version, locale: string): DocPage | undefined {
 export const pageHref = (versionId: string, locale: string, route: string) =>
   `/${locale}/${versionId}${route === '/' ? '' : route}/`
 
-export const markdownHref = (versionId: string, doc: Doc) =>
-  `/${doc.lang}/${versionId}${doc.route === '/' ? '/index' : doc.route}${doc.format === 'html' ? '.html' : '.md'}`
+export const markdownHref = (versionId: string, doc: Doc) => `/${doc.lang}/${versionId}${doc.route}${doc.format === 'html' ? '.html' : '.md'}`
+
+export const homeMarkdownHref = (versionId: string, locale: string) => `/${locale}/${versionId}/index.md`
 
 export const searchHref = (versionId: string, locale: string) => `/${locale}/${versionId}/search.json`
 

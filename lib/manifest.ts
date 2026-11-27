@@ -4,7 +4,11 @@ import { parse } from 'yaml'
 
 // docs/manifest.yaml of the source repository; its header describes every field.
 
-export type Section = { id: string; title: string }
+// A section's title is one string for every language, or one per language.
+export type Section = { id: string; title: string | Record<string, string> }
+
+export const sectionTitle = (section: Section, locale: string): string =>
+  typeof section.title === 'string' ? section.title : (section.title[locale] ?? section.title.en ?? section.id)
 
 export type Doc = {
   id: string
