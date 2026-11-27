@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { site } from '@/site.config'
 import { strings } from '@/lib/i18n'
 import { sectionTitle } from '@/lib/manifest'
+import { anchorMap } from '@/lib/markdown'
 import { nav, pageByKey, pageHref, searchHref, sectionOf, versions, type NavNode, type Page, type Version } from '@/lib/site'
 import { Lockup } from './brand'
 import { LanguageMenu, VersionMenu, type LanguageOption, type VersionOption } from './menus'
@@ -38,11 +39,13 @@ function versionOptions(page: Page): VersionOption[] {
   })
 }
 
+// The same page in each language; a document's anchors map to the same places in the file shown
+// there (lib/markdown.ts anchorMap).
 function languageOptions(v: Version, page: Page): LanguageOption[] {
   return v.locales.map((locale) => {
     const target = pageByKey(v, locale, page.key)!
-    const same = target.kind === 'doc' && page.kind === 'doc' && target.doc.path === page.doc.path
-    return { locale, label: localeLabel(locale), href: pageHref(v.id, locale, target.route), sameDocument: same }
+    const anchors = target.kind === 'doc' && page.kind === 'doc' ? anchorMap(v, page.doc, target.doc) : undefined
+    return { locale, label: localeLabel(locale), href: pageHref(v.id, locale, target.route), anchors }
   })
 }
 

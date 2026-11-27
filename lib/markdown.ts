@@ -14,9 +14,17 @@ import { visit } from 'unist-util-visit'
 import { site } from '../site.config'
 import type { Doc } from './manifest'
 import { assetHref, markdownHref, pageByKey, pageHref, repoHref, type DocPage, type Version } from './site'
+import { recordings, terminalLines, terminalText, type Run } from './terminal'
 
 // One parse of a source file gives every representation of it: the HTML tree, the Markdown
 // output (the source text with only its link targets changed), the contents and the search text.
+
+declare module 'hast' {
+  interface ElementData {
+    // A ```terminal NAME block's recording: its colored lines and the text it showed.
+    recording?: { lines: Run[][]; text: string }
+  }
+}
 
 export type Heading = { depth: number; id: string; text: string }
 export type SearchSection = { anchor: string; heading: string; text: string }
@@ -56,6 +64,8 @@ const schema: Schema = {
     ...defaultSchema.attributes,
     '*': [...defaultSchema.attributes!['*'], 'id', 'align'],
     a: [...defaultSchema.attributes!.a, 'name'],
+    // A ```terminal NAME block names its recording.
+    code: [...(defaultSchema.attributes!.code ?? []), 'dataRecording'],
     img: [...defaultSchema.attributes!.img, 'width', 'height'],
     source: ['srcSet', 'media', 'type'],
   },
@@ -63,6 +73,18 @@ const schema: Schema = {
 
 const parser = unified().use(remarkParse).use(remarkGfm)
 const toHast = unified().use(remarkRehype, { allowDangerousHtml: true }).use(rehypeRaw).use(rehypeSanitize, schema)
+
+// Where each place of `from` is in `to`, another language of the same document, for the ids that
+// differ: an id `to` has too maps to itself and is left out; '' marks a place `to` lacks.
+export function anchorMap(v: Version, from: Doc, to: Doc): Record<string, string> {
+  const map: Record<string, string> = {}
+  if (from.format === 'html' || to.format === 'html') return map
+  for (const id of outline(v, from).ids) {
+    const at = anchorIn(v, from, id, to)
+    if (at !== id) map[id] = at ?? ''
+  }
+  return map
+}
 
 // The HTML of part of a rendered tree, by the same rules as the whole document.
 export const htmlOf = (nodes: RootContent[]): HastRoot => toHast.runSync({ type: 'root', children: nodes }) as HastRoot
@@ -123,7 +145,7 @@ export function outline(v: Version, doc: Doc): Outline {
 // The anchor in `doc` of the place `id` names in `named`, another language of the same document:
 // the same id when `doc` has it, else the heading at the same position, since a translation keeps
 // its source's headings in order (the source repository checks this).
-function anchorIn(v: Version, named: Doc, id: string, doc: Doc): string | undefined {
+export function anchorIn(v: Version, named: Doc, id: string, doc: Doc): string | undefined {
   const target = outline(v, doc)
   if (target.ids.has(id)) return id
   const source = outline(v, named)
@@ -190,6 +212,24 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
     else edits.push({ start: start + at, end: start + at + from.length, text: to })
   }
 
+  // A ```terminal NAME block shows recording NAME of docs/cli/cli-output.json, whose text it
+  // holds (the repository checks both agree, as this build does).
+  const shown = new Map<string, { lines: Run[][]; text: string }>()
+  visit(tree, 'code', (node) => {
+    if (node.lang !== 'terminal' || !node.meta) return
+    const data = recordings(v)
+    const panel = data?.panels.get(node.meta.trim())
+    if (!panel) {
+      problems.push(`${doc.path}: terminal block ${node.meta}: no such recording in docs/cli/cli-output.json`)
+      return
+    }
+    const lines = terminalLines(panel.screen, data!.palette)
+    const text = terminalText(lines)
+    if (text !== node.value) problems.push(`${doc.path}: terminal block ${panel.name} differs from its recording`)
+    shown.set(panel.name, { lines, text })
+    node.data = { ...node.data, hProperties: { ...node.data?.hProperties, dataRecording: panel.name } }
+  })
+
   const headings = headingIds(tree)
   let next = 0
   visit(tree, (node) => {
@@ -247,9 +287,15 @@ export function renderDocument(v: Version, doc: Doc, locale: string): Rendered {
   sections.push(current)
   for (const s of sections) s.text = s.text.replace(/\s+/g, ' ').trim()
 
+  const hast = toHast.runSync(tree) as HastRoot
+  visit(hast, 'element', (node) => {
+    const name = node.tagName === 'code' ? node.properties.dataRecording : undefined
+    if (typeof name === 'string' && shown.has(name)) node.data = { ...node.data, recording: shown.get(name) }
+  })
+
   const rendered: Rendered = {
     tree,
-    hast: toHast.runSync(tree) as HastRoot,
+    hast,
     headings: headings.filter((h) => h.depth === 2 || h.depth === 3),
     markdown,
     sections,

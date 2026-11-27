@@ -1012,11 +1012,14 @@ dialog.drawer.panel {
   border-bottom: 0;
 }
 
+/* Code blocks (Figma "Docs / Code block"): a toolbar with the block's kind and Copy, the code
+   in a viewport that alone scrolls sideways, and a long block's preview: 320 px (240 px on a
+   phone) until expanded, then its full height in the article. Syntax and recording colors are
+   their own, apart from the page's status colors. */
+
 .code-block {
   display: flex;
   flex-direction: column;
-  gap: var(--s3);
-  padding: var(--s4);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
   background: #0a0a0a;
@@ -1027,28 +1030,111 @@ dialog.drawer.panel {
   align-items: center;
   justify-content: space-between;
   gap: var(--s3);
+  padding: var(--s3) var(--s3) 0 var(--s4);
   color: var(--muted);
-  font: 500 12px/16px var(--font);
+  font: 400 12px/18px var(--font);
+}
+
+.code-viewport {
+  padding: var(--s4);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+}
+
+.code-viewport:focus-visible,
+.code-block .button:focus-visible {
+  outline: 2px solid var(--link);
+  outline-offset: -2px;
 }
 
 .code-block pre {
   margin: 0;
-  overflow-x: auto;
 }
 
 .code-block code,
 .prose .code-block code {
+  display: block;
+  width: max-content;
+  min-width: 100%;
   padding: 0;
   border: 0;
   background: none;
-  color: var(--body);
-  font: 400 14px/20px var(--mono);
+  color: #e5e7eb;
+  font: 400 13px/22px var(--mono);
   white-space: pre;
   overflow-wrap: normal;
 }
 
+.code-block ::selection {
+  background: #34465a;
+  color: #fff;
+}
+
+.tok-comment {
+  color: #a1a1aa;
+}
+
+.tok-keyword {
+  color: #c4b5fd;
+}
+
+.tok-string {
+  color: #d9c5a4;
+}
+
+.tok-key {
+  color: #60a5fa;
+}
+
+.tok-command {
+  color: #22d3ee;
+}
+
+.code-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 0 var(--s3) var(--s3) var(--s4);
+  color: var(--muted);
+  font: 400 12px/18px var(--font);
+}
+
+.code-footer .button {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.code-hint {
+  margin: var(--s2) var(--s4) 0;
+  color: var(--muted);
+  font: 400 12px/18px var(--font);
+}
+
+/* The preview: only with JavaScript, which can expand it. */
+@media (scripting: enabled) {
+  .code-block[data-long]:not([data-expanded]) .code-viewport {
+    max-height: 320px;
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+  }
+}
+
+@media (scripting: enabled) and (max-width: 767px) {
+  .code-block[data-long-mobile]:not([data-expanded]) .code-viewport {
+    max-height: 240px;
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 48px), transparent);
+  }
+}
+
+@media (min-width: 768px) {
+  .code-block:not([data-long]) .code-footer {
+    display: none !important;
+  }
+}
+
 .copy {
   flex: none;
+  min-height: 40px;
 }
 
 .copy[data-state='copied'] {
@@ -1056,7 +1142,7 @@ dialog.drawer.panel {
 }
 
 .copy[data-state='failed'] {
-  color: #f87171;
+  color: #fca5a5;
 }
 
 .html-frame {
@@ -1364,7 +1450,13 @@ a.home-feature:hover .home-preview {
 }
 
 .code-block[data-diagram] {
+  gap: var(--s3);
+  padding: var(--s4);
   background: var(--canvas);
+}
+
+.code-block[data-diagram] .code-toolbar {
+  padding: 0;
 }
 
 .diagram {

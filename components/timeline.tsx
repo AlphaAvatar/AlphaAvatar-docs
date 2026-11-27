@@ -170,9 +170,11 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
       requestAnimationFrame(() => (anchor === plan ? jumpTo(0) : jumpToId(anchor)))
       return
     }
+    // A return (the button, or back to the timeline's own URL) restores where the timeline was
+    // left; an anchor followed from a plan, such as a planning note, is shown instead.
     let back = returning.current
     returning.current = null
-    if (!back && was === 'plan') {
+    if (!back && was === 'plan' && !anchor) {
       const kept = readReturn()
       if (kept && kept.url === path() + viewSearch({ ...view, item: undefined })) back = kept
     }

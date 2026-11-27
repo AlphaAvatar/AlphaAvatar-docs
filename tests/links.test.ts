@@ -3,11 +3,11 @@ import { test } from 'node:test'
 import type { Element, Root } from 'hast'
 import { visit } from 'unist-util-visit'
 import { site } from '../site.config'
-import { renderDocument } from '../lib/markdown'
+import { anchorMap, renderDocument } from '../lib/markdown'
 import { entry as fixtureEntry, snapshot, writeSnapshot, load } from './fixture'
 
 // A snapshot with two translated documents (PLAN, STEPS), an English-only guide, a Chinese-only
-// note and the repository README at its overview route.
+// note, and the repository README, which the site does not publish.
 const entry = (id: string, file: string, title: string, lang: string, route: string, group = '') =>
   fixtureEntry(id, file, title, lang, route, group && `, translation_group: ${group}`)
 const docs = [
@@ -17,7 +17,7 @@ const docs = [
   entry('notes', 'docs/notes-zh.md', '笔记', 'zh-CN', '/notes'),
   entry('steps', 'docs/STEPS.md', 'Steps', 'en', '/steps', 'steps'),
   entry('steps-zh', 'docs/STEPS-zh.md', '步骤', 'zh-CN', '/steps', 'steps'),
-  entry('home', 'README.md', 'Overview', 'en', '/overview'),
+  '  - {id: home, path: README.md, title: Overview, type: overview, lang: en, visibility: internal, status: current, applies_to: snapshot}',
   entry('odd-zh', 'docs/odd-zh.md', '另一结构', 'zh-CN', '/odd', 'odd'),
   entry('odd', 'docs/odd.md', 'Odd', 'en', '/odd', 'odd'),
 ]
@@ -86,11 +86,13 @@ test('a Chinese document linking the English file of a translated document stays
   assert.deepEqual(steps.problems, [])
 })
 
-test('links to the README and its sections lead to its overview page, not the home page', () => {
+test('links to the unpublished README and its sections lead to it on GitHub at the snapshot, not the home page', () => {
   for (const [file, locale] of [['docs/STEPS.md', 'en'], ['docs/STEPS-zh.md', 'zh-CN']] as const) {
     const r = renderDocument(v, doc(file), locale)
-    assert.equal(htmlLinks(r.hast).at(-1), `/${locale}/t/overview/#plugins`)
-    assert.equal(mdLinks(r.markdown).at(-1), '/en/t/overview.md#plugins')
+    const github = `https://github.com/AlphaAvatar/AlphaAvatar/blob/${'0'.repeat(40)}/README.md#plugins`
+    assert.equal(htmlLinks(r.hast).at(-1), github)
+    assert.equal(mdLinks(r.markdown).at(-1), github)
+    assert.deepEqual(r.problems, [])
   }
 })
 
@@ -104,4 +106,12 @@ test('an anchor a translation cannot match is reported', () => {
 test('no document may take the home page route', () => {
   const bad = writeSnapshot({ 'README.md': '# Project\n' }, [entry('home', 'README.md', 'Home', 'en', '/')])
   assert.throws(() => load(bad), /route \/, which is the site's home page/)
+})
+
+test('the language menu maps a document’s anchors to the same places in its other language', () => {
+  // PLAN and PLAN-zh: headings in order, their ids differ; an id both have is the same.
+  assert.deepEqual(anchorMap(v, doc('docs/PLAN.md'), doc('docs/PLAN-zh.md')), { plan: '计划', goal: '目标' })
+  assert.deepEqual(anchorMap(v, doc('docs/PLAN-zh.md'), doc('docs/PLAN.md')), { 计划: 'plan', 目标: 'goal' })
+  // odd and odd-zh do not keep the same headings: a place odd-zh lacks maps to nothing.
+  assert.deepEqual(anchorMap(v, doc('docs/odd.md'), doc('docs/odd-zh.md')), { odd: '', one: '', two: '' })
 })

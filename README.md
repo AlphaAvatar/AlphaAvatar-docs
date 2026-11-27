@@ -51,8 +51,9 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 - **Home page.** `/{lang}/{version}/` is the site's own page, not a document: an introduction, the
   latest release, three directions, two featured documents and resources (`lib/home.ts`). Its
   HTML and `index.md` come from one model whose entries name manifest sections, groups and
-  documents; a missing one stops the build. No document may take the route `/` (README is at
-  `/overview`).
+  documents; a missing one stops the build. No document may take the route `/`. The repository's
+  README is GitHub's front page, not a page of this site: the manifest keeps it internal, and links
+  to it lead to GitHub at the snapshot commit.
 - **URLs.** Pages at `/{lang}/{version}/{route}/`; the Markdown source at
   `/{lang}/{version}/{route}.md`, the home page's at `index.md`, an HTML document at `.html`;
   search at `/{lang}/{version}/search.json` (each record names its document and section);
@@ -70,6 +71,12 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 - **Languages.** Documents in one `translation_group` are one page. Where a document has no
   version in the chosen language, its page shows the original and says so; it never shows another
   document or version. Interface text follows the chosen language.
+- **Languages and anchors.** Switching language keeps the document, its query (the Roadmap's
+  filters) and its place: an anchor maps to the same heading in the other language's file.
+- **Redirects.** `vercel.json`, which the host reads before the build, redirects `/` (temporarily)
+  to the first version's home in the default language, and the retired `/get-started/` and
+  `/architecture/` to `/guide/` and `/reference/`, keeping language and version; a test keeps it
+  in step with `site.config.ts`.
 - **Versions.** Switching version keeps the document (by translation group or id); if the target
   version does not publish it, the reader stays on the current page and is told.
 - **Roadmap.** The page of a `type: roadmap` document reads its milestones, items and areas from
@@ -88,6 +95,14 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
   to, by the back button or the browser's. Every anchor the source defines stays on the page; a
   row or milestone that does not follow the format stops the build. Without JavaScript every
   milestone, item and plan is shown. Its `.md` output and search text are those of any document.
+- **Code blocks.** A block's kind comes from what the source says it is, never from its words:
+  ```` ```terminal NAME ```` shows recording NAME of the repository's `docs/cli/cli-output.json`
+  in its recorded colors (the data's palette for 4-bit codes, 256-color and RGB codes as recorded;
+  `lib/terminal.ts`), and must hold the text it showed; a language the site reads (Bash, YAML,
+  JSON, Python, `.env`, INI, TOML) is colored by its grammar (`lib/highlight.ts`); anything else is
+  plain text. Copy takes the whole text, hidden preview lines too, never the toolbar or escape
+  codes. A long block previews 320 px (240 px on a phone) until expanded; only the code scrolls
+  sideways.
 - **Diagrams.** A ```` ```mermaid ```` block is drawn in the browser; the HTML keeps the code
   block, which is what a reader without JavaScript sees, and Mermaid is loaded only by pages
   that hold a diagram.

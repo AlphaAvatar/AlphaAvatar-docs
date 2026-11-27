@@ -28,5 +28,6 @@ test('a Mermaid block is handed to the diagram component with its code kept', ()
   const html = renderToString(createElement(Markdown, { hast: rendered.hast, locale: 'en' }))
   assert.equal(html.match(/data-diagram="mermaid"/g)?.length, 1)
   assert.match(html, /<pre><code class="language-mermaid">flowchart LR\n {4}a\[&quot;Source&quot;\] -- one-to-many --&gt; b\[&quot;Segment&quot;\]/)
-  assert.match(html, /<code class="language-bash">echo hi/)
+  // Bash stays a code block of its own, colored by its grammar.
+  assert.match(html, /<span class="tok-command">echo<\/span> hi/)
 })

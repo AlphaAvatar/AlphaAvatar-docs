@@ -7,7 +7,9 @@ import { strings } from '@/lib/i18n'
 // reader on the current page and says so; it never substitutes another page.
 
 export type VersionOption = { id: string; label: string; href: string | null; home: string }
-export type LanguageOption = { locale: string; label: string; href: string; sameDocument: boolean }
+// `anchors` maps the anchors of this document that are elsewhere, or missing (''), in that
+// language's file; any other anchor is the same there. Without it the page is another one.
+export type LanguageOption = { locale: string; label: string; href: string; anchors?: Record<string, string> }
 
 export function VersionMenu({ id, locale, current, options }: { id: string; locale: string; current: string; options: VersionOption[] }) {
   const t = strings(locale)
@@ -100,11 +102,13 @@ export function LanguageMenu({ id, locale, options }: { id: string; locale: stri
               lang={o.locale}
               aria-current={o.locale === locale}
               onClick={(e) => {
-                // The same file in another language keeps its anchors.
-                if (o.sameDocument && window.location.hash) {
-                  e.preventDefault()
-                  window.location.href = o.href + window.location.hash
-                }
+                // The same document in another language keeps its place and its query (the
+                // Roadmap's filters): the anchor maps to the same heading there, or is dropped.
+                if (!o.anchors || (!window.location.hash && !window.location.search)) return
+                e.preventDefault()
+                const id = decodeURIComponent(window.location.hash.slice(1))
+                const at = id ? (o.anchors[id] ?? id) : ''
+                window.location.href = o.href + window.location.search + (at ? `#${encodeURIComponent(at)}` : '')
               }}
             >
               {o.label}

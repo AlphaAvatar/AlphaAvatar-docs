@@ -1,7 +1,10 @@
 import type { Element, ElementContent, Root } from 'hast'
 import { toJsxRuntime, type Components } from 'hast-util-to-jsx-runtime'
 import { toString } from 'hast-util-to-string'
+import type { ReactNode } from 'react'
 import { Fragment, jsx, jsxs } from 'react/jsx-runtime'
+import { highlight } from '@/lib/highlight'
+import type { Run } from '@/lib/terminal'
 import { strings } from '@/lib/i18n'
 import { sectionTitle, textIn } from '@/lib/manifest'
 import { renderDocument } from '@/lib/markdown'
@@ -20,15 +23,28 @@ import {
   type SectionPage,
   type Version,
 } from '@/lib/site'
+import { CodeBlock } from './code'
 import { CopyButton } from './copy'
 import { Diagram } from './diagram'
 import { Toc } from './navigation'
 import { localeLabel } from './shell'
 
-const SHELL = new Set(['bash', 'sh', 'shell', 'console', 'zsh', 'shellsession'])
+const TOKEN: Record<string, string> = { comment: 'tok-comment', keyword: 'tok-keyword', string: 'tok-string', key: 'tok-key', command: 'tok-command' }
 
-// The source's HTML tree as React; code blocks get a copy control outside their scrolling area,
-// tables scroll in their own region and Mermaid blocks are drawn once the page runs.
+// Lines joined by newlines, each line's pieces as spans.
+function joinLines<T>(lines: T[][], piece: (part: T, i: number) => ReactNode): ReactNode[] {
+  return lines.map((line, i) => (
+    <Fragment key={i}>
+      {line.map(piece)}
+      {i < lines.length - 1 && '\n'}
+    </Fragment>
+  ))
+}
+
+// The source's HTML tree as React. A code block is one of three kinds, by what the source says
+// it is, never by its words: a recording (```terminal NAME) in the recording's own colors; a
+// language this site reads, colored by its grammar; anything else as plain text. Tables scroll
+// in their own region and Mermaid blocks are drawn once the page runs.
 export function Markdown({ hast, locale }: { hast: Root; locale: string }) {
   const t = strings(locale)
   const components: Partial<Components> = {
@@ -43,14 +59,42 @@ export function Markdown({ hast, locale }: { hast: Root; locale: string }) {
           </Diagram>
         )
       }
+      const recording = code?.data?.recording
+      if (recording) {
+        return (
+          <CodeBlock kind="terminal" label={t.terminalAnsi} text={recording.text} lines={recording.lines.length} locale={locale}>
+            {joinLines(recording.lines, (run: Run, i) =>
+              run.color || run.bold ? (
+                <span key={i} style={{ color: run.color, fontWeight: run.bold ? 700 : undefined }}>
+                  {run.text}
+                </span>
+              ) : (
+                run.text
+              ),
+            )}
+          </CodeBlock>
+        )
+      }
+      const colored = highlight(lang, text)
+      if (colored) {
+        return (
+          <CodeBlock kind="source" label={colored.label} text={text} lines={colored.lines.length} locale={locale}>
+            {joinLines(colored.lines, (token, i) =>
+              token.kind ? (
+                <span key={i} className={TOKEN[token.kind]}>
+                  {token.text}
+                </span>
+              ) : (
+                token.text
+              ),
+            )}
+          </CodeBlock>
+        )
+      }
       return (
-        <div className="code-block">
-          <div className="code-toolbar">
-            <span>{lang ? (SHELL.has(lang) ? t.terminal : lang) : ''}</span>
-            <CopyButton text={text} label={t.copyCode} locale={locale} />
-          </div>
-          <pre {...props} />
-        </div>
+        <CodeBlock kind="plain" label={lang && lang !== 'text' ? lang : t.plainText} text={text} lines={text.split('\n').length} locale={locale}>
+          {text}
+        </CodeBlock>
       )
     },
     table: ({ node, ...props }) => (
