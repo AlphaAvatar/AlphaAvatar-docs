@@ -16,7 +16,7 @@ on:
         description: Documentation version's branch in the main repository (site.config.ts)
         default: dev/v0.7.0
       content:
-        description: Main repository commit the published build must include (default the branch's latest)
+        description: Main repository commit on that branch the published build must include (default its latest)
   workflow_call:
     inputs:
       ref:
@@ -55,11 +55,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: AlphaAvatar/AlphaAvatar
-          ref: ${{ inputs.content || inputs.ref || 'dev/v0.7.0' }}
+          ref: ${{ inputs.ref || 'dev/v0.7.0' }}
           path: content
+          fetch-depth: 0
+          filter: blob:none
       - name: Main repository commit to publish
         id: content
-        run: echo "sha=$(git -C content rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        env:
+          CONTENT: ${{ inputs.content }}
+        run: |
+          if [ -n "$CONTENT" ]; then git -C content checkout --quiet "$CONTENT"; fi
+          echo "sha=$(git -C content rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -102,16 +108,19 @@ jobs:
         working-directory: site
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: >-
-          pnpm exec tsx scripts/publish.ts wait
-          "${{ steps.site.outputs.sha }}" "${{ inputs.ref || 'dev/v0.7.0' }}" "${{ steps.content.outputs.sha }}"
-          "${{ steps.trigger.outputs.since || steps.started.outputs.at }}" "$RUNNER_TEMP/live.json"
+          SITE: ${{ steps.site.outputs.sha }}
+          REF: ${{ inputs.ref || 'dev/v0.7.0' }}
+          CONTENT: ${{ steps.content.outputs.sha }}
+          SINCE: ${{ steps.trigger.outputs.since || steps.started.outputs.at }}
+        run: pnpm exec tsx scripts/publish.ts wait "$SITE" "$REF" "$CONTENT" "$SINCE" "$RUNNER_TEMP/live.json"
 
       # out/ built from exactly the commits the site serves, then compared with what it serves.
       - name: Check the deployment
         working-directory: site
+        env:
+          SITE: ${{ steps.live.outputs.site }}
         run: |
-          git checkout --quiet "${{ steps.live.outputs.site }}"
+          git checkout --quiet "$SITE"
           pnpm install --frozen-lockfile
           pnpm exec tsx scripts/publish.ts pin "$RUNNER_TEMP/live.json" "$RUNNER_TEMP/content"
           ALPHAAVATAR_SOURCE="$RUNNER_TEMP/content" pnpm build
