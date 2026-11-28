@@ -40,7 +40,8 @@ anywhere but the deployment: an address is set as the path of its URL there, so 
 
 https://docs.alphaavatar.io is this repository's `main`, built by Vercel. Its
 [`build.json`](https://docs.alphaavatar.io/build.json) says what it was built from: `site`, this
-repository's commit, and for each version the ref and the main repository's commit (`sha`). Every
+repository's commit, and for each version the ref and the main repository's commit (`sha`);
+`deployment` is Vercel's ID of the deployment that built it. Every
 output of a build reads that one commit: each page's "View source", the Markdown files'
 repository links, `search.json` and `llms.txt`.
 
@@ -51,18 +52,20 @@ repository links, `search.json` and `llms.txt`.
   1. checks the main repository's documentation (`scripts/docs/check_docs.py`) at the pushed
      commit, and stops there on a problem;
   2. posts the Vercel Deploy Hook of `main` (secret `DOCS_DEPLOY_HOOK_URL`) and records the job
-     Vercel accepted, which is not yet a deployment;
-  3. waits until `build.json` says `main` or a later commit, and the pushed commit or a later one,
-     or fails after 30 minutes. It says which production deployments Vercel reports failed
+     Vercel accepted, which is not yet a deployment, and the deployment the site served then;
+  3. waits until `build.json` names another deployment than that one, `main` or a later commit,
+     and the pushed commit or a later one, or fails after 30 minutes: a site that already served
+     those commits does not answer the request. It says which production deployments Vercel reports failed
      meanwhile, but does not take one for its own: GitHub's record of a deployment names its
      commit, not what started it;
-  4. fetches and checks out the site commit the site serves, builds `out/` from exactly the
-     commits it serves and runs `pnpm check:export` on the site.
+  4. fetches and checks out the site commit the site serves, builds `out/` as that deployment
+     did, from exactly the commits it serves, and runs `pnpm check:export` on the site.
 
   The build itself checks the commit it actually takes (`pnpm sources`), which can be later
   than the one pushed: a failing snapshot fails the deployment before anything of it is served.
 
-  A push to this repository's `main` is built by Vercel itself; Publish then waits and checks.
+  A push to this repository's `main` is built by Vercel itself; Publish then waits for that
+  commit and checks.
 - **Commits triggered and built.** A build takes each ref's latest commit when it starts, so it
   can include commits pushed after the one that triggered it. Publish records both: the commit
   it was started for, and the one `build.json` then names.
@@ -70,7 +73,8 @@ repository links, `search.json` and `llms.txt`.
   Hook request cancels the deployment an earlier request started from the same commit of this
   repository; each build reads the content when it starts, so the last one has the latest.
 - **Retrying.** Actions → Publish → Run workflow, on `main`; optionally the main repository
-  commit the build must include. It checks, triggers, waits and checks the deployment as above.
+  commit the build must include. It checks, triggers, waits for the new deployment and checks it
+  as above.
   A failed build leaves the site as it was; Vercel's deployment log says why.
 - **A new documentation version.** An entry in `site.config.ts` `versions` (a tag or a branch).
   A branch is also listed under `branches` in the main repository's Docs site workflow on that

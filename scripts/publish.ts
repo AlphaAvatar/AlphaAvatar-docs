@@ -4,12 +4,14 @@
 // site serves.
 //
 //   tsx scripts/publish.ts trigger      POST DOCS_DEPLOY_HOOK_URL, the Vercel Deploy Hook of the
-//                                       production branch; never shows the URL
-//   tsx scripts/publish.ts wait SITE REF CONTENT SINCE FILE
+//                                       production branch; never shows the URL. Notes the
+//                                       deployment the site served then (BEFORE; `none` if unnamed)
+//   tsx scripts/publish.ts wait SITE REF CONTENT SINCE FILE [BEFORE]
 //                                       wait until build.json at the site says this repository's
 //                                       commit SITE or a later one, and for REF the main
-//                                       repository's commit CONTENT or a later one; write it to
-//                                       FILE. Fail after WAIT_MINUTES (30), saying which production
+//                                       repository's commit CONTENT or a later one, and, given
+//                                       BEFORE, another deployment than BEFORE; write it to FILE.
+//                                       Fail after WAIT_MINUTES (30), saying which production
 //                                       deployments Vercel reported failed meanwhile.
 //   tsx scripts/publish.ts checkout SHA this checkout moved to commit SHA, fetched first
 //   tsx scripts/publish.ts pin FILE DIR a repository at DIR whose refs are the commits FILE names,
@@ -20,7 +22,7 @@ import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { site } from '../site.config'
 
-export type Build = { site: string | null; repository: string; versions: { id: string; ref: string; sha: string; committed: string }[] }
+export type Build = { site: string | null; deployment: string | null; repository: string; versions: { id: string; ref: string; sha: string; committed: string }[] }
 
 export const SITE_REPOSITORY = 'AlphaAvatar/AlphaAvatar-docs'
 const DEPLOYMENTS = 'https://vercel.com/alphaavatars-projects/alpha-avatar-docs/deployments'
@@ -39,14 +41,23 @@ const io: Io = {
 
 const output = (name: string, value: string) => process.env.GITHUB_OUTPUT && appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`)
 
-export async function trigger(hook: string | undefined, { fetch, say }: Pick<Io, 'fetch' | 'say'> = io) {
+// The build.json the site serves, if it answers.
+async function served(fetch: Io['fetch'], now: Io['now']) {
+  const response = await fetch(`${site.url}/build.json?at=${now()}`, { cache: 'no-store' }).catch(() => undefined)
+  return response?.ok ? ((await response.json()) as Build) : undefined
+}
+
+// The deployment served when the request is made is noted first: the build the request starts is
+// another one, even where that one already serves the commits wanted.
+export async function trigger(hook: string | undefined, { fetch, now, say }: Pick<Io, 'fetch' | 'now' | 'say'> = io) {
   if (!hook) throw new Error('DOCS_DEPLOY_HOOK_URL is not set: add the Deploy Hook URL as an Actions secret of this repository')
+  const before = (await served(fetch, now))?.deployment ?? null
   const response = await fetch(hook, { method: 'POST' })
   if (!response.ok) throw new Error(`the Deploy Hook answered ${response.status}: nothing was triggered`)
   const { job } = (await response.json()) as { job: { id: string; state: string; createdAt: number } }
   const at = new Date(job.createdAt).toISOString()
-  say(`Vercel accepted Deploy Hook job \`${job.id}\` (${job.state}) at ${at}: a production build of this repository's main branch, not yet deployed.`)
-  return { job: job.id, since: at }
+  say(`Vercel accepted Deploy Hook job \`${job.id}\` (${job.state}) at ${at}, while the site served ${before ? `deployment \`${before}\`` : 'no deployment it names'}: a production build of this repository's main branch, not yet deployed.`)
+  return { job: job.id, since: at, before }
 }
 
 // GitHub's API, read with the workflow's token.
@@ -82,19 +93,24 @@ async function failures(api: ReturnType<typeof github>, want: { site: string; si
   return found
 }
 
-export async function wait(want: { site: string; ref: string; content: string; since: string }, { fetch, sleep, now, say }: Io = io, minutes = Number(process.env.WAIT_MINUTES || 30)) {
+// `before`, for a Deploy Hook's request: the deployment served when it was accepted (null: none
+// named), which does not answer it.
+export async function wait(want: { site: string; ref: string; content: string; since: string; before?: string | null }, { fetch, sleep, now, say }: Io = io, minutes = Number(process.env.WAIT_MINUTES || 30)) {
   const api = github(fetch)
   const until = now() + minutes * 60_000
+  const requested = want.before !== undefined
   let seen = ''
   const noted = new Set<string>()
   for (;;) {
-    const response = await fetch(`${site.url}/build.json?at=${now()}`, { cache: 'no-store' }).catch(() => undefined)
-    const live = response?.ok ? ((await response.json()) as Build) : undefined
+    const live = await served(fetch, now)
     const content = live?.versions.find((v) => v.ref === want.ref)?.sha
-    const serving = live ? `site ${live.site?.slice(0, 7) ?? 'unknown'}, ${want.ref} ${content?.slice(0, 7) ?? 'unknown'}` : 'no build.json'
+    const serving = live ? `site ${live.site?.slice(0, 7) ?? 'unknown'}, ${want.ref} ${content?.slice(0, 7) ?? 'unknown'}${live.deployment ? ` (deployment ${live.deployment})` : ''}` : 'no build.json'
     if (serving !== seen) say(`${new Date(now()).toISOString()}: ${site.url} serves ${(seen = serving)}`)
-    if (live?.site && content && (await reaches(api, SITE_REPOSITORY, want.site, live.site)) && (await reaches(api, site.repository, want.content, content))) {
-      say(`Deployed: ${site.url} serves this repository at \`${live.site}\` and ${want.ref} at \`${content}\`, which includes \`${want.content}\`.`)
+    const fresh = !requested || (!!live?.deployment && live.deployment !== want.before)
+    if (fresh && live?.site && content && (await reaches(api, SITE_REPOSITORY, want.site, live.site)) && (await reaches(api, site.repository, want.content, content))) {
+      const by = live.deployment ? `, in deployment \`${live.deployment}\`` : ''
+      const after = requested ? `, not the one served when Vercel accepted the request (${want.before ? `\`${want.before}\`` : 'none named'})` : ''
+      say(`Deployed: ${site.url} serves this repository at \`${live.site}\` and ${want.ref} at \`${content}\`, which includes \`${want.content}\`${by}${after}.`)
       return live
     }
     for (const failure of await failures(api, want)) {
@@ -104,7 +120,8 @@ export async function wait(want: { site: string; ref: string; content: string; s
     }
     if (now() >= until) {
       const why = noted.size ? `; failed meanwhile: ${[...noted].join('; ')}` : ''
-      throw new Error(`after ${minutes} minutes ${site.url} still serves ${serving}, not ${want.ref} ${want.content.slice(0, 7)} or later from site ${want.site.slice(0, 7)} or later: the build failed, was cancelled or is still queued (${DEPLOYMENTS})${why}`)
+      const after = requested ? ` in another deployment than ${want.before ?? 'the unnamed one'} served when the request was accepted` : ''
+      throw new Error(`after ${minutes} minutes ${site.url} still serves ${serving}, not ${want.ref} ${want.content.slice(0, 7)} or later from site ${want.site.slice(0, 7)} or later${after}: the build failed, was cancelled or is still queued (${DEPLOYMENTS})${why}`)
     }
     await sleep(20_000)
   }
@@ -140,15 +157,19 @@ export function pin(build: Build, dir: string) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command, ...args] = process.argv.slice(2)
   try {
-    if (command === 'trigger') output('since', (await trigger(process.env.DOCS_DEPLOY_HOOK_URL)).since)
-    else if (command === 'wait') {
-      const [siteCommit, ref, content, since, file] = args
-      const live = await wait({ site: siteCommit, ref, content, since })
+    if (command === 'trigger') {
+      const { since, before } = await trigger(process.env.DOCS_DEPLOY_HOOK_URL)
+      output('since', since)
+      output('before', before ?? 'none')
+    } else if (command === 'wait') {
+      const [siteCommit, ref, content, since, file, before] = args
+      const live = await wait({ site: siteCommit, ref, content, since, before: before ? (before === 'none' ? null : before) : undefined })
       writeFileSync(file, JSON.stringify(live, null, 2) + '\n')
       output('site', live.site!)
+      output('deployment', live.deployment ?? '')
     } else if (command === 'checkout') checkout(process.cwd(), args[0])
     else if (command === 'pin') pin(JSON.parse(readFileSync(args[0], 'utf8')) as Build, args[1])
-    else throw new Error('usage: publish.ts trigger | wait SITE REF CONTENT SINCE FILE | checkout SHA | pin FILE DIR')
+    else throw new Error('usage: publish.ts trigger | wait SITE REF CONTENT SINCE FILE [BEFORE] | checkout SHA | pin FILE DIR')
   } catch (e) {
     console.error(`publish: ${(e as Error).message}`)
     process.exit(1)

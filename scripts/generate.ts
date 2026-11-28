@@ -110,8 +110,8 @@ out(
 )
 
 // What the site is built from: this repository's commit (Vercel names it; elsewhere the checkout's)
-// and each version's snapshot, read by the Publish workflow (scripts/publish.ts) and by anyone
-// asking which content the site serves.
+// and each version's snapshot, and on Vercel which deployment it is, read by the Publish workflow
+// (scripts/publish.ts) and by anyone asking which content the site serves.
 function siteCommit(): string | null {
   if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA
   try {
@@ -126,6 +126,7 @@ out(
   JSON.stringify(
     {
       site: siteCommit(),
+      deployment: process.env.VERCEL_DEPLOYMENT_ID || null,
       repository: site.repository,
       versions: versions().map((v) => ({ id: v.id, ref: v.source.ref, sha: v.source.sha, committed: v.source.committed })),
     },

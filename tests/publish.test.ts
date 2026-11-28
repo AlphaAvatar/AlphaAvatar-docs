@@ -9,8 +9,9 @@ import { checkout, SITE_REPOSITORY, trigger, wait, type Build } from '../scripts
 
 const HOOK = 'https://api.vercel.com/v1/integrations/deploy/prj_synthetic/synthetic-hook-key'
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-const build = (siteCommit: string | null, content: string): Build => ({
+const build = (siteCommit: string | null, content: string, deployment: string | null = null): Build => ({
   site: siteCommit,
+  deployment,
   repository: site.repository,
   versions: [{ id: 'v0.7.0', ref: 'dev/v0.7.0', sha: content, committed: '2026-11-28T00:00:00Z' }],
 })
@@ -45,18 +46,26 @@ function world(builds: (Build | undefined)[], history: Record<string, string[]>,
 const HISTORY = { [SITE_REPOSITORY]: ['s1', 's2', 's3'], [site.repository]: ['c1', 'c2', 'c3'] }
 const WANT = { site: 's2', ref: 'dev/v0.7.0', content: 'c2', since: '2026-11-28T12:00:00.000Z' }
 
-test('the Deploy Hook is posted, its URL never shown, and what Vercel accepted is said to be not yet deployed', async () => {
+test('the Deploy Hook is posted, its URL never shown, and what Vercel accepted is said to be not yet deployed, beside the deployment served then', async () => {
   await assert.rejects(trigger(undefined), /DOCS_DEPLOY_HOOK_URL is not set/)
   const said: string[] = []
   const sent: { url: string; method?: string }[] = []
+  let serving: Build | undefined = build('s1', 'c1', 'dpl_0')
   const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     sent.push({ url: String(input), method: init?.method })
+    if (String(input).startsWith(`${site.url}/build.json`)) return serving ? json(serving) : new Response('not found', { status: 404 })
     return String(input) === HOOK ? json({ job: { id: 'job-1', state: 'PENDING', createdAt: Date.parse('2026-11-28T12:00:00Z') } }) : new Response('', { status: 404 })
   }) as typeof globalThis.fetch
-  assert.deepEqual(await trigger(HOOK, { fetch, say: (l) => void said.push(l) }), { job: 'job-1', since: '2026-11-28T12:00:00.000Z' })
-  assert.deepEqual(sent, [{ url: HOOK, method: 'POST' }])
-  assert.match(said.join('\n'), /accepted Deploy Hook job `job-1` \(PENDING\).*not yet deployed/)
-  await assert.rejects(trigger(`${HOOK}-gone`, { fetch, say: (l) => void said.push(l) }), (e: Error) => /answered 404/.test(e.message) && !e.message.includes('synthetic-hook-key'))
+  const io = { fetch, now: () => 0, say: (l: string) => void said.push(l) }
+  assert.deepEqual(await trigger(HOOK, io), { job: 'job-1', since: '2026-11-28T12:00:00.000Z', before: 'dpl_0' })
+  assert.deepEqual(sent.filter((r) => r.method === 'POST'), [{ url: HOOK, method: 'POST' }])
+  assert.match(said.join('\n'), /accepted Deploy Hook job `job-1` \(PENDING\) .*while the site served deployment `dpl_0`.*not yet deployed/)
+  // A site that names no deployment, or does not answer, is noted as such.
+  serving = build('s1', 'c1')
+  assert.equal((await trigger(HOOK, io)).before, null)
+  serving = undefined
+  assert.equal((await trigger(HOOK, io)).before, null)
+  await assert.rejects(trigger(`${HOOK}-gone`, io), (e: Error) => /answered 404/.test(e.message) && !e.message.includes('synthetic-hook-key'))
   assert.ok(!said.join('\n').includes('synthetic-hook-key'))
 })
 
@@ -69,6 +78,26 @@ test('the wait ends once the site serves the site commit and the content commit 
   assert.match(w.said.at(-1)!, /^Deployed: .* serves this repository at `s3` and dev\/v0.7.0 at `c3`, which includes `c2`\.$/)
   // Exactly what was wanted ends it at once.
   assert.equal((await wait(WANT, world([build('s2', 'c2')], HISTORY).io)).site, 's2')
+})
+
+test("a Deploy Hook's request is answered by another deployment than the one served when it was accepted, even where that one already serves the commits wanted", async () => {
+  // The site already serves what is wanted; the request's build is served two polls later.
+  const w = world([build('s2', 'c2', 'dpl_0'), build('s2', 'c2', 'dpl_0'), build('s2', 'c2', 'dpl_1')], HISTORY)
+  const live = await wait({ ...WANT, before: 'dpl_0' }, w.io)
+  assert.equal(live.deployment, 'dpl_1')
+  assert.equal(w.polls(), 3)
+  assert.match(w.said.at(-1)!, /^Deployed: .*, in deployment `dpl_1`, not the one served when Vercel accepted the request \(`dpl_0`\)\.$/)
+  // Where none was named then, the first deployment named answers it.
+  const unnamed = world([build('s2', 'c2'), build('s2', 'c2', 'dpl_1')], HISTORY)
+  assert.equal((await wait({ ...WANT, before: null }, unnamed.io)).deployment, 'dpl_1')
+  assert.equal(unnamed.polls(), 2)
+  // Without a request (a push Vercel builds by itself) the commits alone end it.
+  assert.equal((await wait(WANT, world([build('s2', 'c2', 'dpl_0')], HISTORY).io)).deployment, 'dpl_0')
+  // A request whose build is never served fails, even with the commits wanted served.
+  await assert.rejects(
+    wait({ ...WANT, before: 'dpl_0' }, world([build('s2', 'c2', 'dpl_0')], HISTORY).io, 1),
+    /still serves site s2, dev\/v0\.7\.0 c2 \(deployment dpl_0\), not .* in another deployment than dpl_0 served when the request was accepted/,
+  )
 })
 
 test('a failed deployment that cannot be told for the build waited for is said, not taken for its outcome: the wait goes on until the site serves it', async () => {

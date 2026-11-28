@@ -112,16 +112,19 @@ jobs:
           REF: ${{ inputs.ref || 'dev/v0.7.0' }}
           CONTENT: ${{ steps.content.outputs.sha }}
           SINCE: ${{ steps.trigger.outputs.since || steps.started.outputs.at }}
-        run: pnpm exec tsx scripts/publish.ts wait "$SITE" "$REF" "$CONTENT" "$SINCE" "$RUNNER_TEMP/live.json"
+          BEFORE: ${{ steps.trigger.outputs.before }}
+        run: pnpm exec tsx scripts/publish.ts wait "$SITE" "$REF" "$CONTENT" "$SINCE" "$RUNNER_TEMP/live.json" "$BEFORE"
 
-      # out/ built from exactly the commits the site serves, then compared with what it serves.
+      # out/ built as the deployment the site serves was, from exactly its commits and named as it
+      # (build.json), then compared with what it serves.
       - name: Check the deployment
         working-directory: site
         env:
           SITE: ${{ steps.live.outputs.site }}
+          DEPLOYMENT: ${{ steps.live.outputs.deployment }}
         run: |
           pnpm exec tsx scripts/publish.ts checkout "$SITE"
           pnpm install --frozen-lockfile
           pnpm exec tsx scripts/publish.ts pin "$RUNNER_TEMP/live.json" "$RUNNER_TEMP/content"
-          ALPHAAVATAR_SOURCE="$RUNNER_TEMP/content" pnpm build
+          VERCEL_DEPLOYMENT_ID="$DEPLOYMENT" ALPHAAVATAR_SOURCE="$RUNNER_TEMP/content" pnpm build
           pnpm check:export https://docs.alphaavatar.io
