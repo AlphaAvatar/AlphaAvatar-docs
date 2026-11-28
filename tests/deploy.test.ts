@@ -7,7 +7,7 @@ import { site } from '../site.config'
 import { DocArticle } from '../components/article'
 import { renderDocument } from '../lib/markdown'
 import { outputFile, pageHref, pageOf, sourceHref, versions, type DocPage } from '../lib/site'
-import { checkDeployment, checkExport, leadsTo, MAX_HOPS, servedAt, slashRule, type Redirect } from '../scripts/check-export'
+import { checkDeployment, checkExport, leadsTo, MAX_HOPS, servedAt, slashRule, urlAt, type Redirect } from '../scripts/check-export'
 import { entry, snapshot } from './fixture'
 
 // vercel.json, which the host reads before any build, follows site.config.ts: `/` leads, by a
@@ -246,6 +246,10 @@ test("at a deployment, a redirect's Location is read whole: one leading off the 
   assert.equal(leadsTo('https://elsewhere.test/en/v0.7.0', base), 'https://elsewhere.test/en/v0.7.0')
   assert.equal(leadsTo('//elsewhere.test/en/v0.7.0', base), 'https://elsewhere.test/en/v0.7.0')
   assert.equal(leadsTo('http://deployment.test/en/v0.7.0', base), 'http://deployment.test/en/v0.7.0')
+  assert.equal(leadsTo('guide/', `${base}/en/v0.7.0/`), '/en/v0.7.0/guide/')
+  assert.equal(leadsTo('https://deployment.test//outside.test/en/v0.7.0', base), '//outside.test/en/v0.7.0')
+  assert.equal(urlAt('//outside.test/en/v0.7.0', base).href, 'https://deployment.test//outside.test/en/v0.7.0')
+  assert.equal(urlAt('/\\outside.test/a b?x=1#y', base).href, 'https://deployment.test/%5Coutside.test/a%20b?x=1#y')
 
   const answer = (at: string, from: string, status: number, location: string) => (at === from ? new Response(null, { status, headers: { location } }) : undefined)
   // Another site, or this one without TLS, at the path the redirect names: never followed.
@@ -259,4 +263,40 @@ test("at a deployment, a redirect's Location is read whole: one leading off the 
   // This site's own URL in full is the same address; a query added is not.
   assert.deepEqual(await deployed(apart, redirects, (at) => answer(at, '/', 307, 'https://deployment.test/en/v0.7.0')), [])
   assert.deepEqual(await deployed(apart, redirects, (at) => answer(at, '/', 307, '/en/v0.7.0?from=root')), ['/ answers / → 307 /en/v0.7.0?from=root, not 307 to /en/v0.7.0 and 200 there'])
+})
+
+// Every request the check makes, and the bypass secret it sends with each, at a deployment of `files`.
+async function requested(files: Record<string, string>, change?: (at: string) => Response | undefined) {
+  const serve = host(files, redirects, change)
+  const sent: { url: string; secret?: string }[] = []
+  const [fetchBefore, secretBefore] = [globalThis.fetch, process.env.VERCEL_AUTOMATION_BYPASS_SECRET]
+  try {
+    process.env.VERCEL_AUTOMATION_BYPASS_SECRET = 'synthetic-secret'
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      sent.push({ url: String(input), secret: (init?.headers as Record<string, string> | undefined)?.['x-vercel-protection-bypass'] })
+      return serve(input)
+    }) as typeof fetch
+    return { problems: (await checkDeployment('https://deployment.test', exported(files), redirects)).sort(), sent }
+  } finally {
+    globalThis.fetch = fetchBefore
+    if (secretBefore === undefined) delete process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+    else process.env.VERCEL_AUTOMATION_BYPASS_SECRET = secretBefore
+  }
+}
+
+test('at a deployment, a path that reads as another host stays a path there: nothing is requested, nor the secret sent, anywhere else', async () => {
+  // A Location at the deployment's own origin whose path begins `//` (or `/\`, which URLs read as `//`).
+  for (const location of ['https://deployment.test//outside.test/en/v0.7.0', 'https://deployment.test/\\outside.test/en/v0.7.0']) {
+    const { problems, sent } = await requested(apart, (at) => (at === '/' ? new Response(null, { status: 307, headers: { location } }) : undefined))
+    assert.deepEqual(problems, ['/ ends at //outside.test/en/v0.7.0, which answers 404: / → 307 //outside.test/en/v0.7.0'])
+    assert.ok(sent.some((r) => r.url === 'https://deployment.test//outside.test/en/v0.7.0'))
+    assert.deepEqual(sent.filter((r) => new URL(r.url).origin !== 'https://deployment.test' || r.secret !== 'synthetic-secret'), [], location)
+  }
+  // A page naming such a path of this site, which the host's slash rule answers by a Location that
+  // leads off it: reported, not followed.
+  const naming = { ...apart, 'en/v0.7.0/guide/index.html': page('Guide', '<a href="/.//outside.test/x">x</a>') }
+  const { problems, sent } = await requested(naming)
+  assert.deepEqual(problems, ['//outside.test/x, which the deployment names, answers 308 to https://outside.test/x/'])
+  assert.ok(sent.some((r) => r.url === 'https://deployment.test//outside.test/x'))
+  assert.deepEqual(sent.filter((r) => new URL(r.url).origin !== 'https://deployment.test' || r.secret !== 'synthetic-secret'), [])
 })

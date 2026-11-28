@@ -25,7 +25,9 @@ set): each address answers 200 with what `out/` holds for it, and its old form w
 there; every address it names answers 200; a missing page answers 404; each redirect leads as
 `vercel.json` says, past the host's own slash redirect, in one step and with no loop, to what
 `out/` holds there. A redirect's `Location` is read whole: one to another site (or to this one
-without TLS) is never followed, and is reported.
+without TLS) is never followed, and is reported. Nothing is requested, nor the secret sent,
+anywhere but the deployment: an address is set as the path of its URL there, so even
+`//host/…` stays a path of the deployment.
 
 ## Sources
 

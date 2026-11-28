@@ -15,7 +15,8 @@
 //                            it; every address its pages name answers 200; a missing one answers
 //                            404; each redirect leads as vercel.json says to what out/ holds, in
 //                            one step, with no loop and never off the site. A protected preview
-//                            is read with VERCEL_AUTOMATION_BYPASS_SECRET.
+//                            is read with VERCEL_AUTOMATION_BYPASS_SECRET, sent to it alone:
+//                            nothing is requested anywhere else.
 
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -120,11 +121,22 @@ function addresses(files: Map<string, Buffer>) {
 // One answer: a redirect names where it leads, a path of this site or, off it, the whole URL.
 type Step = { status: number; to?: string; body?: Buffer }
 
-// A redirect's Location read from `base`: its path, query and fragment where it stays at base's
-// origin, else the URL it leads off to.
-export function leadsTo(location: string, base: string): string {
-  const to = new URL(location, base)
-  return to.origin === new URL(base).origin ? plain(to.pathname) + to.search + to.hash : to.href
+// A redirect's Location, read from the URL that answered it: its path, query and fragment where it
+// stays at that origin, else the URL it leads off to.
+export function leadsTo(location: string, from: URL | string): string {
+  const to = new URL(location, from)
+  return to.origin === new URL(from).origin ? plain(to.pathname) + to.search + to.hash : to.href
+}
+
+// The URL of an address of this site at `base`: its path, query and fragment set in base's URL,
+// never read as a reference, so that a path such as `//elsewhere/…` stays a path there.
+export function urlAt(address: string, base: string): URL {
+  const [, path, search = '', hash = ''] = /^([^?#]*)(\?[^#]*)?(#[\s\S]*)?$/.exec(address)!
+  const url = new URL(base)
+  url.pathname = encodeURI(path)
+  url.search = search
+  url.hash = hash
+  return url
 }
 
 // More redirects than this from one address, a loop, leaving the site or an address that is not
@@ -232,11 +244,15 @@ async function each<T>(items: T[], run: (item: T) => Promise<void>, at = 8) {
 export async function checkDeployment(base: string, files: Map<string, Buffer>, redirects: Redirect[]): Promise<string[]> {
   const problems: string[] = []
   const secret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+  const origin = new URL(base).origin
   const step = async (address: string): Promise<Step> => {
-    const response = await fetch(new URL(encodeURI(address), base), { redirect: 'manual', headers: secret ? { 'x-vercel-protection-bypass': secret } : {} })
+    const url = urlAt(address, base)
+    // A request, and the secret with it, goes to the deployment only.
+    if (url.origin !== origin) throw new Error(`check-export: ${address} would be requested from ${url.origin}, not ${origin}`)
+    const response = await fetch(url, { redirect: 'manual', headers: secret ? { 'x-vercel-protection-bypass': secret } : {} })
     const body = Buffer.from(await response.arrayBuffer())
     const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null
-    return { status: response.status, to: location ? leadsTo(location, base) : undefined, body }
+    return { status: response.status, to: location ? leadsTo(location, url) : undefined, body }
   }
   const told = (s: Step) => `${s.status}${s.to ? ` to ${s.to}` : ''}`
   const redirect = redirectOf(redirects)
