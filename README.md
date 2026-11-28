@@ -23,9 +23,9 @@ The build runs the main repository's documentation check, which needs Python 3 w
 | `next build` | One HTML page per published document, language and version | `out/` |
 | `pnpm check:export` | `out/` as the host serves it: no address served from two different files; every address of the site that a page, Markdown file, index or the sitemap names is served as named, with no redirect; each redirect leads in one step to an address of this site that is served | — |
 
-`pnpm build` runs every step in this order; Vercel runs it too (`vercel.json`, after installing
-PyYAML), so any failure fails the deployment and the site keeps serving the last one that
-succeeded. `pnpm check:export URL` reads a
+`pnpm build` runs every step in this order; Vercel runs it too (`vercel.json`,
+`scripts/vercel-build.sh`, which first gives its Python PyYAML), so any failure fails the
+deployment and the site keeps serving the last one that succeeded. `pnpm check:export URL` reads a
 deployment of what `out/` was built from (a protected one with `VERCEL_AUTOMATION_BYPASS_SECRET`
 set): each address answers 200 with what `out/` holds for it, and its old form with a slash leads
 there; every address it names answers 200; a missing page answers 404; each redirect leads as
