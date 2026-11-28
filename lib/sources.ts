@@ -27,13 +27,15 @@ export function snapshots(): Snapshot[] {
 // A snapshot passes the main repository's own documentation check, the one its
 // CONTRIBUTING.md asks for (manifest, links and anchors, the Roadmap and its release dates), run
 // from the snapshot on itself before anything is built from it: what is checked is what is
-// published. It needs Python 3 with PyYAML (PYTHON, else python3). Git is kept from finding a
+// published. It needs Python 3 with PyYAML: PYTHON, a command or a path read from where the build
+// runs (the check itself runs in the snapshot), else python3. Git is kept from finding a
 // repository around the snapshot, such as this one around .cache/, so that the check lists the
 // snapshot's own files.
 export function checkSnapshot(root: string, label: string) {
   const script = path.join(root, 'scripts/docs/check_docs.py')
   if (!existsSync(script)) throw new Error(`${label} has no scripts/docs/check_docs.py: it cannot be checked, so it is not published`)
-  const python = process.env.PYTHON || 'python3'
+  const given = process.env.PYTHON || 'python3'
+  const python = /[\\/]/.test(given) ? path.resolve(given) : given
   try {
     execFileSync(python, [script], {
       cwd: root,

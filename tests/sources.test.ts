@@ -50,3 +50,18 @@ test("inside another git repository the check still reads the snapshot's own fil
   writeFileSync(path.join(root, 'docs/unlisted.md'), '# Unlisted\n')
   assert.throws(() => checkSnapshot(root, 'copy'), /docs\/unlisted\.md is neither listed nor grouped/)
 })
+
+test('a PYTHON given as a relative path is read from where the build runs, not from the snapshot', () => {
+  const before = process.env.PYTHON
+  const given = before || 'python3'
+  const python = given.includes('/') ? path.resolve(given) : execFileSync('sh', ['-c', 'command -v "$0"', given], { encoding: 'utf8' }).trim()
+  const relative = path.relative(process.cwd(), python)
+  assert.ok(!path.isAbsolute(relative) && relative.includes('/'), relative)
+  try {
+    process.env.PYTHON = relative
+    checkSnapshot(snapshots()[0].root, 'this build')
+  } finally {
+    if (before === undefined) delete process.env.PYTHON
+    else process.env.PYTHON = before
+  }
+})

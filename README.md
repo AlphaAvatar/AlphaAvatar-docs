@@ -13,7 +13,8 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 ```
 
 The build runs the main repository's documentation check, which needs Python 3 with PyYAML:
-`python3`, or the interpreter `PYTHON` names (for example `PYTHON=../AlphaAvatar/.venv/bin/python`).
+`python3`, or the interpreter `PYTHON` names, a command or a path from where the build runs
+(for example `PYTHON=../AlphaAvatar/.venv/bin/python`).
 
 | Step | Does | Writes |
 | --- | --- | --- |
