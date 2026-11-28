@@ -160,7 +160,8 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
   const nothing = { milestone: undefined, area: undefined, state: undefined }
 
   // The first view, where the page waited for it (lib/roadmap-view.ts RESTORING), is shown once it
-  // is the URL's: hydration renders the page as written, and the URL's view right after. A reload,
+  // is the URL's, in place of the placeholder or of the whole Roadmap shown while it was slow:
+  // hydration renders the page as written, and the URL's view right after. A reload,
   // or a return from another page, then goes back to where the reader was, which the browser
   // could not keep while the page waited.
   useLayoutEffect(() => {
@@ -447,8 +448,19 @@ export function Timeline({ locale, lang, breadcrumb, title, intro, source, verif
         <p className="meta">{t.roadmapSource(source)}</p>
       </header>
 
-      <div className="rm-wait">
-        <p className="meta">{t.roadmapRestoring}</p>
+      <div className="rm-wait" role="status">
+        <p className="meta rm-opening">{t.roadmapRestoring}</p>
+        <div className="rm-slow">
+          <p className="meta">{t.roadmapSlow}</p>
+          <div className="rm-actions">
+            <button type="button" className="button" data-wait="retry">
+              {t.roadmapRetry}
+            </button>
+            <button type="button" className="button" data-wait="whole">
+              {t.roadmapWhole}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div className="rm-toolbar js-only" data-off={off(kind !== 'timeline' || !!draft)}>

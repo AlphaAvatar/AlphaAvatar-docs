@@ -17,14 +17,15 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 | `pnpm sources` | Resolves each version in `site.config.ts` to one commit and extracts it | `.cache/sources.json`, `.cache/snapshots/<sha>/` |
 | `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap | `public/` (ignored) |
 | `next build` | One HTML page per published document, language and version | `out/` |
-| `pnpm check:export` | `out/` as the host serves it: no address served from two different files; every address of the site that a page, Markdown file, index or the sitemap names is served as named, with no redirect; each redirect leads in one step to an address that is served | — |
+| `pnpm check:export` | `out/` as the host serves it: no address served from two different files; every address of the site that a page, Markdown file, index or the sitemap names is served as named, with no redirect; each redirect leads in one step to an address of this site that is served | — |
 
 `pnpm test`, `pnpm typecheck` and `pnpm lint` check the code. `pnpm check:export URL` reads a
 deployment of what `out/` was built from (a protected one with `VERCEL_AUTOMATION_BYPASS_SECRET`
 set): each address answers 200 with what `out/` holds for it, and its old form with a slash leads
 there; every address it names answers 200; a missing page answers 404; each redirect leads as
 `vercel.json` says, past the host's own slash redirect, in one step and with no loop, to what
-`out/` holds there.
+`out/` holds there. A redirect's `Location` is read whole: one to another site (or to this one
+without TLS) is never followed, and is reported.
 
 ## Sources
 
@@ -116,7 +117,10 @@ there; every address it names answers 200; a missing page answers 404; each redi
   timeline; where the URL names another view (filters, an expanded milestone, a full plan's
   anchor), a script ahead of the Roadmap holds it behind a placeholder of one steady size until
   the page shows that view, never the timeline first, and a reload or a return then goes back to
-  where the reader was. Without JavaScript nothing waits, and every milestone, item and plan is
+  where the reader was. Where the view has not opened 8 s after the wait began, or 3 s after the
+  page loaded, the placeholder says so and offers to load the page again or to show the whole
+  Roadmap as without JavaScript; it never shows the timeline instead, and the view still opens if
+  the script runs later. Without JavaScript nothing waits, and every milestone, item and plan is
   shown. Its `.md` output and search text are those of any document.
 - **Code blocks.** A block's kind comes from what the source says it is, never from its words:
   ```` ```terminal NAME ```` shows recording NAME of the repository's `docs/cli/cli-output.json`

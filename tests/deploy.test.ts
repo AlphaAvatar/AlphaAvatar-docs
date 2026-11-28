@@ -7,7 +7,7 @@ import { site } from '../site.config'
 import { DocArticle } from '../components/article'
 import { renderDocument } from '../lib/markdown'
 import { outputFile, pageHref, pageOf, sourceHref, versions, type DocPage } from '../lib/site'
-import { checkDeployment, checkExport, MAX_HOPS, servedAt, slashRule, type Redirect } from '../scripts/check-export'
+import { checkDeployment, checkExport, leadsTo, MAX_HOPS, servedAt, slashRule, type Redirect } from '../scripts/check-export'
 import { entry, snapshot } from './fixture'
 
 // vercel.json, which the host reads before any build, follows site.config.ts: `/` leads, by a
@@ -128,6 +128,7 @@ test('a redirect whose end is not served, that loops, takes too many steps or mo
   const files = exported(apart)
   assert.deepEqual(await checkExport(files, [redirect('/old/', '/gone/')]), ['/old/ ends at /gone/, which answers 404: /old/ → 308 /gone/'])
   assert.deepEqual(await checkExport(files, [redirect('/a/', '/b/'), redirect('/b/', '/a/')]), ['/a/ loops: /a/ → 308 /b/ → 308 /a/', '/b/ loops: /b/ → 308 /a/ → 308 /b/'])
+  assert.deepEqual(await checkExport(files, [redirect('/old/', 'https://elsewhere.test/en/v0.7.0/guide/')]), ['/old/ leads off the site: /old/ → 308 https://elsewhere.test/en/v0.7.0/guide/'])
   const long = await checkExport(files, CHAIN)
   assert.equal(long[0], `/hop-0/ takes more than ${MAX_HOPS} redirects: /hop-0/ → ${Array.from({ length: MAX_HOPS + 1 }, (_, i) => `308 /hop-${i + 1}/`).join(' → ')}`)
   // The root's redirect as it was: the home it led to is served without the slash.
@@ -235,4 +236,27 @@ test('at a deployment, a page is answered at its own address, its old one with a
     '/en/v0.7.0/get-started/ leads to /en/v0.7.0/guide/, which answers with something else, of en/v0.7.0/guide/index.html',
     '/en/v0.7.0/guide/ answers with something else, of en/v0.7.0/guide/index.html',
   ])
+})
+
+test("at a deployment, a redirect's Location is read whole: one leading off the site, or adding a query, is found", async () => {
+  const base = 'https://deployment.test'
+  assert.equal(leadsTo('/en/v0.7.0', base), '/en/v0.7.0')
+  assert.equal(leadsTo('https://deployment.test/en/v0.7.0', base), '/en/v0.7.0')
+  assert.equal(leadsTo('/en/v0.7.0?from=root#top', base), '/en/v0.7.0?from=root#top')
+  assert.equal(leadsTo('https://elsewhere.test/en/v0.7.0', base), 'https://elsewhere.test/en/v0.7.0')
+  assert.equal(leadsTo('//elsewhere.test/en/v0.7.0', base), 'https://elsewhere.test/en/v0.7.0')
+  assert.equal(leadsTo('http://deployment.test/en/v0.7.0', base), 'http://deployment.test/en/v0.7.0')
+
+  const answer = (at: string, from: string, status: number, location: string) => (at === from ? new Response(null, { status, headers: { location } }) : undefined)
+  // Another site, or this one without TLS, at the path the redirect names: never followed.
+  for (const location of ['https://elsewhere.test/en/v0.7.0', '//elsewhere.test/en/v0.7.0', 'http://deployment.test/en/v0.7.0']) {
+    const to = new URL(location, base).href
+    assert.deepEqual(await deployed(apart, redirects, (at) => answer(at, '/', 307, location)), [`/ leads off the site: / → 307 ${to}`])
+    assert.deepEqual(await deployed(apart, redirects, (at) => answer(at, '/zh-CN/v0.7.0/', 308, location.replace('/en/', '/zh-CN/'))), [
+      `/zh-CN/v0.7.0/ answers 308 to ${to.replace('/en/', '/zh-CN/')}, not 308 to /zh-CN/v0.7.0`,
+    ])
+  }
+  // This site's own URL in full is the same address; a query added is not.
+  assert.deepEqual(await deployed(apart, redirects, (at) => answer(at, '/', 307, 'https://deployment.test/en/v0.7.0')), [])
+  assert.deepEqual(await deployed(apart, redirects, (at) => answer(at, '/', 307, '/en/v0.7.0?from=root')), ['/ answers / → 307 /en/v0.7.0?from=root, not 307 to /en/v0.7.0 and 200 there'])
 })

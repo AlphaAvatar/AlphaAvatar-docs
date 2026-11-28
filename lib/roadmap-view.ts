@@ -46,8 +46,13 @@ export function statusCounts(items: Matchable[], order: readonly string[]): [str
 // (filters, an expanded milestone, a full plan's anchor), the Roadmap waits behind its placeholder,
 // of one steady size, until the page's script shows that view: `restoringScript`, run before the
 // Roadmap is read, adds the style RESTORING, and the Timeline removes it. Without JavaScript
-// nothing waits; if the page's script never runs, the style goes a few seconds after the load.
+// nothing waits. Where the view has not opened SLOW.wait ms after the wait began, or SLOW.load ms
+// after the page loaded, whichever comes first, the placeholder says so and offers to load the
+// page again or to show the whole Roadmap as without JavaScript; it never shows the timeline the
+// page is written with, and the view still opens if the script runs later.
 export const RESTORING = 'rm-restoring'
+
+export const SLOW = { wait: 8000, load: 3000 }
 
 export function restores(search: string, anchor: string, plans: readonly string[]): boolean {
   const view = parseView(search)
@@ -55,16 +60,25 @@ export function restores(search: string, anchor: string, plans: readonly string[
 }
 
 // `restores`, for the browser to run as the page is read; `plans` are the anchors of full plans.
+// The placeholder's buttons carry `data-wait`. The whole Roadmap marks the style data-whole, which
+// app/styles.css reads to hide nothing, and follows its rules for a page without JavaScript.
 export function restoringScript(plans: readonly string[]): string {
   const json = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c')
   const hide = (kept: string) => `.rm>:not(.rm-wait)${kept}{display:none!important}.rm-wait{display:flex!important}`
+  const slow = '.rm-opening{display:none!important}.rm-slow{display:block!important}'
+  const whole = '.rm-wait,.rm .js-only{display:none!important}.rm .no-js{display:block!important}'
   return (
     `(function(){try{var q=new URLSearchParams(location.search),a='';` +
     `try{a=decodeURIComponent(location.hash.replace(/^#/,''))}catch(e){}` +
     `var plan=${json(plans)}.indexOf(a)>=0;` +
     `if(!plan&&!${json(FILTERS)}.some(function(k){return q.get(k)})&&!q.getAll('expanded').length)return;` +
-    `var s=document.createElement('style');s.id=${json(RESTORING)};` +
-    `s.textContent=plan?${json(hide(''))}:${json(hide(':not(.roadmap-head)'))};document.head.appendChild(s);` +
-    `addEventListener('load',function(){setTimeout(function(){s.remove()},3000)})}catch(e){}})()`
+    `var s=document.createElement('style'),wait=plan?${json(hide(''))}:${json(hide(':not(.roadmap-head)'))};` +
+    `s.id=${json(RESTORING)};s.textContent=wait;document.head.appendChild(s);` +
+    `function slow(){if(s.isConnected&&s.textContent===wait)s.textContent=wait+${json(slow)}}` +
+    `setTimeout(slow,${SLOW.wait});addEventListener('load',function(){setTimeout(slow,${SLOW.load})});` +
+    `document.addEventListener('click',function(e){var b=s.isConnected&&e.target.closest&&e.target.closest('[data-wait]');if(!b)return;` +
+    `if(b.getAttribute('data-wait')==='retry')return location.reload();` +
+    `s.textContent=${json(whole)};s.setAttribute('data-whole','');var to=a&&document.getElementById(a);if(to)to.scrollIntoView({behavior:'instant'})})` +
+    `}catch(e){}})()`
   )
 }

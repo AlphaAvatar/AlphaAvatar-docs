@@ -8,14 +8,14 @@
 //   pnpm check:export        out/ as built: no address is served from two different files; every
 //                            address of this site that a page, Markdown file, index or the
 //                            sitemap names is served as named, with no redirect; each redirect
-//                            leads in one step to an address that is served. `pnpm build` ends
-//                            with it.
+//                            leads in one step to an address of this site that is served. `pnpm
+//                            build` ends with it.
 //   pnpm check:export URL    a deployment of what out/ was built from: each address answers 200
 //                            with what out/ holds for it, and its old form with a slash leads to
 //                            it; every address its pages name answers 200; a missing one answers
 //                            404; each redirect leads as vercel.json says to what out/ holds, in
-//                            one step and with no loop. A protected preview is read with
-//                            VERCEL_AUTOMATION_BYPASS_SECRET.
+//                            one step, with no loop and never off the site. A protected preview
+//                            is read with VERCEL_AUTOMATION_BYPASS_SECRET.
 
 import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
@@ -117,10 +117,18 @@ function addresses(files: Map<string, Buffer>) {
   return at
 }
 
-// One answer: a redirect names where it leads.
+// One answer: a redirect names where it leads, a path of this site or, off it, the whole URL.
 type Step = { status: number; to?: string; body?: Buffer }
 
-// More redirects than this from one address, a loop or an address that is not served ends it.
+// A redirect's Location read from `base`: its path, query and fragment where it stays at base's
+// origin, else the URL it leads off to.
+export function leadsTo(location: string, base: string): string {
+  const to = new URL(location, base)
+  return to.origin === new URL(base).origin ? plain(to.pathname) + to.search + to.hash : to.href
+}
+
+// More redirects than this from one address, a loop, leaving the site or an address that is not
+// served ends it.
 export const MAX_HOPS = 5
 
 // The redirects an address leads through, to the first answer that is not one.
@@ -131,6 +139,7 @@ async function trace(address: string, step: (address: string) => Promise<Step>) 
     const answer = await step(at)
     if (!answer.to) return { hops, at, answer, end: 'answer' as const }
     hops.push({ status: answer.status, to: answer.to })
+    if (!answer.to.startsWith('/')) return { hops, at: answer.to, answer, end: 'off site' as const }
     if (seen.has(answer.to)) return { hops, at: answer.to, answer, end: 'loop' as const }
     if (hops.length > MAX_HOPS) return { hops, at: answer.to, answer, end: 'too many' as const }
     seen.add(answer.to)
@@ -147,7 +156,8 @@ async function checkRedirects(redirects: Redirect[], step: (address: string) => 
       const t = await trace(from, step)
       const chain = [from, ...t.hops.map((h) => `${h.status} ${h.to}`)].join(' → ')
       const last = t.hops.at(-1)
-      if (t.end === 'loop') problems.push(`${from} loops: ${chain}`)
+      if (t.end === 'off site') problems.push(`${from} leads off the site: ${chain}`)
+      else if (t.end === 'loop') problems.push(`${from} loops: ${chain}`)
       else if (t.end === 'too many') problems.push(`${from} takes more than ${MAX_HOPS} redirects: ${chain}`)
       else if (t.answer.status !== 200) problems.push(`${from} ends at ${t.at}, which answers ${t.answer.status}: ${chain}`)
       else if (!last || last.status !== status || last.to !== to || t.hops.length > 1 + Number(t.hops[0].status === 308 && slashRule(from) === t.hops[0].to)) {
@@ -226,7 +236,7 @@ export async function checkDeployment(base: string, files: Map<string, Buffer>, 
     const response = await fetch(new URL(encodeURI(address), base), { redirect: 'manual', headers: secret ? { 'x-vercel-protection-bypass': secret } : {} })
     const body = Buffer.from(await response.arrayBuffer())
     const location = response.status >= 300 && response.status < 400 ? response.headers.get('location') : null
-    return { status: response.status, to: location ? plain(new URL(location, base).pathname) : undefined, body }
+    return { status: response.status, to: location ? leadsTo(location, base) : undefined, body }
   }
   const told = (s: Step) => `${s.status}${s.to ? ` to ${s.to}` : ''}`
   const redirect = redirectOf(redirects)

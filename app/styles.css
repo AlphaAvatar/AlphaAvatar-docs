@@ -1971,16 +1971,36 @@ dialog.rm-detail::backdrop {
 }
 
 /* The placeholder the first view waits behind, where the URL names another view than the page is
-   written with (lib/roadmap-view.ts RESTORING): one steady size until the view replaces it. */
+   written with (lib/roadmap-view.ts RESTORING): one steady size until the view replaces it. What
+   it offers when the view is slow to open shows only then. */
 .rm-wait {
   display: none;
   min-height: 100vh;
   align-items: flex-start;
 }
 
-/* With JavaScript the Roadmap shows one view at a time: what it hides carries data-off. */
+.rm-slow {
+  display: none;
+}
+
+/* With JavaScript the Roadmap shows one view at a time: what it hides carries data-off. While it
+   waits for its view, the placeholder can show the whole Roadmap instead, as without JavaScript,
+   by marking its style data-whole (lib/roadmap-view.ts); a browser without :has() offers only to
+   load the page again. */
 @media (scripting: enabled) {
-  .rm [data-off] {
+  :root:not(:has(> head > #rm-restoring[data-whole])) .rm [data-off] {
+    display: none !important;
+  }
+}
+
+@supports not selector(:has(*)) {
+  @media (scripting: enabled) {
+    .rm [data-off] {
+      display: none !important;
+    }
+  }
+
+  [data-wait='whole'] {
     display: none !important;
   }
 }
