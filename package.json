@@ -7,7 +7,7 @@
     "sources": "tsx scripts/sources.ts",
     "generate": "tsx scripts/generate.ts",
     "dev": "pnpm sources && pnpm generate && next dev",
-    "build": "pnpm sources && pnpm generate && next build && pnpm check:export",
+    "build": "pnpm sources && pnpm generate && pnpm test && pnpm typecheck && pnpm lint && next build && pnpm check:export",
     "check:export": "tsx scripts/check-export.ts",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

@@ -1,8 +1,9 @@
 // Write the outputs that sit beside the HTML pages, from the snapshots `pnpm sources` pinned:
 // each document's Markdown (or HTML) source with links rewritten, the displayed repository
-// assets, search indexes, llms.txt files and the sitemap. Nothing is written when a link or
-// anchor does not resolve, or the Roadmap does not follow its format.
+// assets, search indexes, llms.txt files, the sitemap and build.json. Nothing is written when a
+// link or anchor does not resolve, or the Roadmap does not follow its format.
 
+import { execFileSync } from 'node:child_process'
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { site } from '../site.config'
@@ -108,13 +109,38 @@ out(
   ].join('\n'),
 )
 
+// What the site is built from: this repository's commit (Vercel names it; elsewhere the checkout's)
+// and each version's snapshot, read by the Publish workflow (scripts/publish.ts) and by anyone
+// asking which content the site serves.
+function siteCommit(): string | null {
+  if (process.env.VERCEL_GIT_COMMIT_SHA) return process.env.VERCEL_GIT_COMMIT_SHA
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return null
+  }
+}
+
+out(
+  'build.json',
+  JSON.stringify(
+    {
+      site: siteCommit(),
+      repository: site.repository,
+      versions: versions().map((v) => ({ id: v.id, ref: v.source.ref, sha: v.source.sha, committed: v.source.committed })),
+    },
+    null,
+    2,
+  ) + '\n',
+)
+
 if (problems.length) {
   for (const p of [...new Set(problems)]) console.error(`generate: ${p}`)
   process.exit(1)
 }
 
 // Generated roots only; public/brand and public/icons belong to the site.
-for (const root of [...allLocales(), '_assets', '_html', 'llms.txt', 'sitemap.xml']) rmSync(path.join(PUBLIC, root), { recursive: true, force: true })
+for (const root of [...allLocales(), '_assets', '_html', 'llms.txt', 'sitemap.xml', 'build.json']) rmSync(path.join(PUBLIC, root), { recursive: true, force: true })
 for (const [file, body] of files) {
   mkdirSync(path.dirname(file), { recursive: true })
   if (typeof body === 'string') writeFileSync(file, body)

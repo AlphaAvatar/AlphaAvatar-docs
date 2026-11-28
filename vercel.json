@@ -1,4 +1,5 @@
 {
+  "buildCommand": "pnpm build",
   "redirects": [
     { "source": "/", "destination": "/en/v0.7.0", "permanent": false },
     { "source": "/:locale(en|zh-CN)/:version/get-started", "destination": "/:locale/:version/guide/", "permanent": false },

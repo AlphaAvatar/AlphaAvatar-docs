@@ -1,0 +1,123 @@
+// The steps of the Publish workflow (.github/workflows/publish.yml), which builds the production
+// site again when the main repository's documentation changes, or by hand, and checks it once
+// it is served. Accepted is not deployed: `trigger` says what Vercel accepted, `wait` what the
+// site serves.
+//
+//   tsx scripts/publish.ts trigger      POST DOCS_DEPLOY_HOOK_URL, the Vercel Deploy Hook of the
+//                                       production branch; never shows the URL
+//   tsx scripts/publish.ts wait SITE REF CONTENT SINCE FILE
+//                                       wait until build.json at the site says this repository's
+//                                       commit SITE or a later one, and for REF the main
+//                                       repository's commit CONTENT or a later one; write it to
+//                                       FILE. Fail on a production deployment Vercel reports
+//                                       failed since SINCE, or after WAIT_MINUTES (30).
+//   tsx scripts/publish.ts pin FILE DIR a repository at DIR whose refs are the commits FILE names,
+//                                       to build out/ from exactly them (ALPHAAVATAR_SOURCE=DIR)
+
+import { execFileSync } from 'node:child_process'
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
+import { site } from '../site.config'
+
+export type Build = { site: string | null; repository: string; versions: { id: string; ref: string; sha: string; committed: string }[] }
+
+export const SITE_REPOSITORY = 'AlphaAvatar/AlphaAvatar-docs'
+const DEPLOYMENTS = 'https://vercel.com/alphaavatars-projects/alpha-avatar-docs/deployments'
+
+type Io = { fetch: typeof fetch; sleep: (ms: number) => Promise<void>; now: () => number; say: (line: string) => void }
+
+const io: Io = {
+  fetch: (...args) => fetch(...args),
+  sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+  now: () => Date.now(),
+  say: (line) => {
+    console.log(line)
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${line}\n`)
+  },
+}
+
+const output = (name: string, value: string) => process.env.GITHUB_OUTPUT && appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`)
+
+export async function trigger(hook: string | undefined, { fetch, say }: Pick<Io, 'fetch' | 'say'> = io) {
+  if (!hook) throw new Error('DOCS_DEPLOY_HOOK_URL is not set: add the Deploy Hook URL as an Actions secret of this repository')
+  const response = await fetch(hook, { method: 'POST' })
+  if (!response.ok) throw new Error(`the Deploy Hook answered ${response.status}: nothing was triggered`)
+  const { job } = (await response.json()) as { job: { id: string; state: string; createdAt: number } }
+  const at = new Date(job.createdAt).toISOString()
+  say(`Vercel accepted Deploy Hook job \`${job.id}\` (${job.state}) at ${at}: a production build of this repository's main branch, not yet deployed.`)
+  return { job: job.id, since: at }
+}
+
+// GitHub's API, read with the workflow's token.
+const github = (get: typeof fetch) => async <T>(path: string): Promise<T> => {
+  const token = process.env.GITHUB_TOKEN
+  const response = await get(`https://api.github.com/${path}`, { headers: { accept: 'application/vnd.github+json', ...(token ? { authorization: `Bearer ${token}` } : {}) } })
+  if (!response.ok) throw new Error(`GitHub API ${path} answered ${response.status}`)
+  return (await response.json()) as T
+}
+
+// Whether commit `at` is `wanted` or later on its branch.
+async function reaches(api: ReturnType<typeof github>, repository: string, wanted: string, at: string) {
+  if (wanted === at) return true
+  const { status } = await api<{ status: string }>(`repos/${repository}/compare/${wanted}...${at}`)
+  return status === 'ahead' || status === 'identical'
+}
+
+// A production deployment Vercel reports failed since `since` (cancelled ones are superseded).
+async function failed(api: ReturnType<typeof github>, since: string) {
+  const deployments = await api<{ sha: string; created_at: string; statuses_url: string }[]>(`repos/${SITE_REPOSITORY}/deployments?environment=Production&per_page=10`)
+  for (const d of deployments.filter((d) => Date.parse(d.created_at) >= Date.parse(since) - 1000)) {
+    const [last] = await api<{ state: string; description?: string; log_url?: string; target_url?: string }[]>(d.statuses_url.replace('https://api.github.com/', ''))
+    if (last && (last.state === 'failure' || last.state === 'error') && !/cancel/i.test(last.description ?? '')) {
+      return `Vercel reports the production deployment of ${d.sha.slice(0, 7)} ${last.state}: ${last.description ?? 'no description'} (${last.log_url || last.target_url || DEPLOYMENTS})`
+    }
+  }
+}
+
+export async function wait(want: { site: string; ref: string; content: string; since: string }, { fetch, sleep, now, say }: Io = io, minutes = Number(process.env.WAIT_MINUTES || 30)) {
+  const api = github(fetch)
+  const until = now() + minutes * 60_000
+  let seen = ''
+  for (;;) {
+    const response = await fetch(`${site.url}/build.json?at=${now()}`, { cache: 'no-store' }).catch(() => undefined)
+    const live = response?.ok ? ((await response.json()) as Build) : undefined
+    const content = live?.versions.find((v) => v.ref === want.ref)?.sha
+    const serving = live ? `site ${live.site?.slice(0, 7) ?? 'unknown'}, ${want.ref} ${content?.slice(0, 7) ?? 'unknown'}` : 'no build.json'
+    if (serving !== seen) say(`${new Date(now()).toISOString()}: ${site.url} serves ${(seen = serving)}`)
+    if (live?.site && content && (await reaches(api, SITE_REPOSITORY, want.site, live.site)) && (await reaches(api, site.repository, want.content, content))) {
+      say(`Deployed: ${site.url} serves this repository at \`${live.site}\` and ${want.ref} at \`${content}\`, which includes \`${want.content}\`.`)
+      return live
+    }
+    const failure = await failed(api, want.since)
+    if (failure) throw new Error(`${failure}; the site still serves ${serving}`)
+    if (now() >= until) throw new Error(`after ${minutes} minutes ${site.url} still serves ${serving}, not ${want.ref} ${want.content.slice(0, 7)} or later from site ${want.site.slice(0, 7)} or later: the build failed, was cancelled or is still queued (${DEPLOYMENTS})`)
+    await sleep(20_000)
+  }
+}
+
+export function pin(build: Build, dir: string) {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: ['ignore', 'pipe', 'inherit'] })
+  mkdirSync(dir, { recursive: true })
+  git('init', '--quiet')
+  for (const v of build.versions) {
+    git('fetch', '--quiet', '--depth=1', `https://github.com/${build.repository}.git`, v.sha)
+    git('update-ref', `refs/heads/${v.ref}`, v.sha)
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const [command, ...args] = process.argv.slice(2)
+  try {
+    if (command === 'trigger') output('since', (await trigger(process.env.DOCS_DEPLOY_HOOK_URL)).since)
+    else if (command === 'wait') {
+      const [siteCommit, ref, content, since, file] = args
+      const live = await wait({ site: siteCommit, ref, content, since })
+      writeFileSync(file, JSON.stringify(live, null, 2) + '\n')
+      output('site', live.site!)
+    } else if (command === 'pin') pin(JSON.parse(readFileSync(args[0], 'utf8')) as Build, args[1])
+    else throw new Error('usage: publish.ts trigger | wait SITE REF CONTENT SINCE FILE | pin FILE DIR')
+  } catch (e) {
+    console.error(`publish: ${(e as Error).message}`)
+    process.exit(1)
+  }
+}

@@ -1,0 +1,118 @@
+name: Publish
+
+# Has Vercel build the production site again, waits until docs.alphaavatar.io serves the build and
+# checks it (README.md, "Publishing"). Started by:
+# - the main repository's Docs site workflow, when the documentation the site reads changes there
+#   (workflow_call, with that repository's DOCS_DEPLOY_HOOK_URL secret);
+# - hand, to retry or to check (workflow_dispatch, with this repository's DOCS_DEPLOY_HOOK_URL);
+# - a push to main, which Vercel builds by itself: then this only waits and checks.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Documentation version's branch in the main repository (site.config.ts)
+        default: dev/v0.7.0
+      content:
+        description: Main repository commit the published build must include (default the branch's latest)
+  workflow_call:
+    inputs:
+      ref:
+        description: Documentation version's branch in the main repository (site.config.ts)
+        type: string
+        required: true
+      content:
+        description: Main repository commit the published build must include
+        type: string
+        required: true
+    secrets:
+      DOCS_DEPLOY_HOOK_URL:
+        required: true
+
+permissions:
+  contents: read
+  deployments: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    # Called from the main repository, `github` describes its push; only this repository's own
+    # push is built by Vercel without the Deploy Hook.
+    env:
+      OWN_PUSH: ${{ github.repository == 'AlphaAvatar/AlphaAvatar-docs' && github.event_name == 'push' }}
+    concurrency:
+      group: publish-${{ github.repository }}
+      cancel-in-progress: true
+    steps:
+      - name: Note the start
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # The main repository's documentation, checked before anything is built from it.
+      - uses: actions/checkout@v4
+        with:
+          repository: AlphaAvatar/AlphaAvatar
+          ref: ${{ inputs.content || inputs.ref || 'dev/v0.7.0' }}
+          path: content
+      - name: Main repository commit to publish
+        id: content
+        run: echo "sha=$(git -C content rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Check the main repository's documentation
+        run: |
+          python -m pip install --quiet pyyaml==6.0.3
+          python content/scripts/docs/check_docs.py
+
+      # This repository at the commit Vercel builds: main, or the commit pushed.
+      - uses: actions/checkout@v4
+        with:
+          repository: AlphaAvatar/AlphaAvatar-docs
+          ref: ${{ env.OWN_PUSH == 'true' && github.sha || 'main' }}
+          path: site
+          fetch-depth: 0
+      - name: Site commit to publish
+        id: site
+        run: echo "sha=$(git -C site rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: site/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: site
+
+      - name: Trigger the production build
+        id: trigger
+        if: env.OWN_PUSH != 'true'
+        working-directory: site
+        env:
+          DOCS_DEPLOY_HOOK_URL: ${{ secrets.DOCS_DEPLOY_HOOK_URL }}
+        run: pnpm exec tsx scripts/publish.ts trigger
+
+      - name: Wait until the site serves it
+        id: live
+        working-directory: site
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >-
+          pnpm exec tsx scripts/publish.ts wait
+          "${{ steps.site.outputs.sha }}" "${{ inputs.ref || 'dev/v0.7.0' }}" "${{ steps.content.outputs.sha }}"
+          "${{ steps.trigger.outputs.since || steps.started.outputs.at }}" "$RUNNER_TEMP/live.json"
+
+      # out/ built from exactly the commits the site serves, then compared with what it serves.
+      - name: Check the deployment
+        working-directory: site
+        run: |
+          git checkout --quiet "${{ steps.live.outputs.site }}"
+          pnpm install --frozen-lockfile
+          pnpm exec tsx scripts/publish.ts pin "$RUNNER_TEMP/live.json" "$RUNNER_TEMP/content"
+          ALPHAAVATAR_SOURCE="$RUNNER_TEMP/content" pnpm build
+          pnpm check:export https://docs.alphaavatar.io

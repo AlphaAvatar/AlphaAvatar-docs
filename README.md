@@ -15,11 +15,13 @@ ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitH
 | Step | Does | Writes |
 | --- | --- | --- |
 | `pnpm sources` | Resolves each version in `site.config.ts` to one commit and extracts it | `.cache/sources.json`, `.cache/snapshots/<sha>/` |
-| `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap | `public/` (ignored) |
+| `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap, `build.json` | `public/` (ignored) |
+| `pnpm test`, `pnpm typecheck`, `pnpm lint` | The code's checks | — |
 | `next build` | One HTML page per published document, language and version | `out/` |
 | `pnpm check:export` | `out/` as the host serves it: no address served from two different files; every address of the site that a page, Markdown file, index or the sitemap names is served as named, with no redirect; each redirect leads in one step to an address of this site that is served | — |
 
-`pnpm test`, `pnpm typecheck` and `pnpm lint` check the code. `pnpm check:export URL` reads a
+`pnpm build` runs every step in this order; Vercel runs it too (`vercel.json`), so any failure
+fails the deployment and the site keeps serving the last one that succeeded. `pnpm check:export URL` reads a
 deployment of what `out/` was built from (a protected one with `VERCEL_AUTOMATION_BYPASS_SECRET`
 set): each address answers 200 with what `out/` holds for it, and its old form with a slash leads
 there; every address it names answers 200; a missing page answers 404; each redirect leads as
@@ -28,6 +30,41 @@ there; every address it names answers 200; a missing page answers 404; each redi
 without TLS) is never followed, and is reported. Nothing is requested, nor the secret sent,
 anywhere but the deployment: an address is set as the path of its URL there, so even
 `//host/…` stays a path of the deployment.
+
+## Publishing
+
+https://docs.alphaavatar.io is this repository's `main`, built by Vercel. Its
+[`build.json`](https://docs.alphaavatar.io/build.json) says what it was built from: `site`, this
+repository's commit, and for each version the ref and the main repository's commit (`sha`). Every
+output of a build reads that one commit: each page's "View source", the Markdown files'
+repository links, `search.json` and `llms.txt`.
+
+- **Updating the documentation.** Push to the main repository's `dev/v0.7.0`. A push that touches
+  what the site reads (`docs/` but `docs/agent-logs/`, any Markdown, HTML or image file) runs its
+  **Docs site** workflow, which runs this repository's **Publish** workflow
+  (`.github/workflows/publish.yml`, `scripts/publish.ts`):
+  1. checks the main repository's documentation (`scripts/docs/check_docs.py`), and stops there
+     on a problem, before anything is built;
+  2. posts the Vercel Deploy Hook of `main` (secret `DOCS_DEPLOY_HOOK_URL`) and records the job
+     Vercel accepted, which is not yet a deployment;
+  3. waits until `build.json` says `main` or a later commit, and the pushed commit or a later one;
+     it fails with what Vercel reports for a failed production deployment, or after 30 minutes;
+  4. builds `out/` from exactly the commits the site serves and runs `pnpm check:export` on the
+     site.
+
+  A push to this repository's `main` is built by Vercel itself; Publish then waits and checks.
+- **Commits triggered and built.** A build takes each ref's latest commit when it starts, so it
+  can include commits pushed after the one that triggered it. Publish records both: the commit
+  it was started for, and the one `build.json` then names.
+- **Updates in quick succession.** The Docs site workflow cancels its run in progress; a Deploy
+  Hook request cancels the deployment an earlier request started from the same commit of this
+  repository; each build reads the content when it starts, so the last one has the latest.
+- **Retrying.** Actions → Publish → Run workflow, on `main`; optionally the main repository
+  commit the build must include. It checks, triggers, waits and checks the deployment as above.
+  A failed build leaves the site as it was; Vercel's deployment log says why.
+- **A new documentation version.** An entry in `site.config.ts` `versions` (a tag or a branch).
+  A branch is also listed under `branches` in the main repository's Docs site workflow on that
+  branch.
 
 ## Sources
 
