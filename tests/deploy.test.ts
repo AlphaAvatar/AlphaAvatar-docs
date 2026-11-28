@@ -6,7 +6,7 @@ import { renderToString } from 'react-dom/server'
 import { site } from '../site.config'
 import { DocArticle } from '../components/article'
 import { renderDocument } from '../lib/markdown'
-import { outputFile, pageHref, pageOf, sourceHref, versions, type DocPage } from '../lib/site'
+import { outputFile, pageHref, pageOf, sourceHref, versions, type DocPage, type Version } from '../lib/site'
 import { checkDeployment, checkExport, leadsTo, MAX_HOPS, servedAt, slashRule, urlAt, type Redirect } from '../scripts/check-export'
 import { entry, snapshot } from './fixture'
 
@@ -53,26 +53,64 @@ test('the host serves a directory index at the directory, without a slash where 
   for (const served of ['/', '/en/v0.7.0', '/en/v0.7.0/guide/', '/llms.txt', '/en/v0.7.0/cli/output.html', '/.well-known/x']) assert.equal(slashRule(served), undefined, served)
 })
 
-test("every page's address is the one the host serves it at, with no redirect", () => {
-  let dotted = 0
-  for (const v of versions()) {
-    for (const locale of v.locales) {
-      for (const p of v.pages.get(locale)!) {
-        const href = pageHref(v.id, locale, p.route)
-        // Next writes a page's HTML as its directory's index.html.
-        assert.equal(servedAt(`${href.slice(1).replace(/\/?$/, '/')}index.html`), href, href)
-        assert.equal(slashRule(href), undefined, href)
-        if (!href.endsWith('/')) dotted++
-      }
-    }
+// Next writes a page's HTML as its directory's index.html.
+const pageFile = (href: string) => `${href.slice(1).replace(/\/?$/, '/')}index.html`
+
+// Each page's address, checked to be the one the host serves its file at, with no redirect.
+function servedAsNamed(v: Version): string[] {
+  const hrefs = v.locales.flatMap((locale) => v.pages.get(locale)!.map((p) => pageHref(v.id, locale, p.route)))
+  for (const href of hrefs) {
+    assert.equal(servedAt(pageFile(href)), href, href)
+    assert.equal(slashRule(href), undefined, href)
   }
-  // Each language's home (`/en/v0.7.0`) and its v0.6.x release notes.
-  assert.equal(dotted, 20)
+  return hrefs
+}
+
+test("every page's address is the one the host serves it at, with no redirect", () => {
+  for (const v of versions()) servedAsNamed(v)
 })
 
 const exported = (files: Record<string, string>) => new Map(Object.entries(files).map(([f, body]) => [f, Buffer.from(body)]))
 const page = (title: string, body = '') => `<!DOCTYPE html><html><head><title>${title}</title><script>self.__next_f.push(["build ${Math.random()}"])</script></head><body>${body}</body></html>`
 const NOT_FOUND = page('Not found', '<a href="/en/v0.7.0">Home</a>')
+
+// A version whose release notes, in two languages, are at addresses whose last segment reads as
+// a file name, as its homes are.
+const NEWS = ['  - id: updates', '    title: Updates', '    summary: News.', '    groups:', '      - {id: releases, title: Release notes}']
+const withReleases = (tags: string[]) =>
+  snapshot(
+    Object.fromEntries(tags.flatMap((tag) => [[`docs/releases/${tag}.md`, `# ${tag}\n`], [`docs/releases/${tag}-zh.md`, `# ${tag}\n`]])),
+    tags.flatMap((tag, i) =>
+      ['en', 'zh-CN'].map(
+        (lang) =>
+          `  - {id: release-${tag}-${lang}, path: docs/releases/${tag}${lang === 'en' ? '' : '-zh'}.md, title: ${tag}, type: release, lang: ${lang}, ` +
+          `route: /releases/${tag}, group: releases, order: ${i + 1}, visibility: public, status: historical, applies_to: ${tag}, ` +
+          `release: {tag: ${tag}, published: 2026-01-0${i + 1}}, translation_group: release-${tag}}`,
+      ),
+    ),
+    NEWS,
+    'v9.9.9',
+  )
+
+test('release notes added in both languages are served at their own addresses, and an export of them passes the check', async () => {
+  const dotted = (v: Version) => servedAsNamed(v).filter((href) => !href.endsWith('/'))
+  const homes = ['/en/v9.9.9', '/zh-CN/v9.9.9']
+  const notes = (tag: string) => [`/en/v9.9.9/releases/${tag}`, `/zh-CN/v9.9.9/releases/${tag}`]
+  assert.deepEqual(dotted(withReleases(['v0.1.1', 'v0.1.2'])).sort(), [...homes, ...notes('v0.1.1'), ...notes('v0.1.2')].sort())
+
+  const added = withReleases(['v0.1.1', 'v0.1.2', 'v0.1.3'])
+  assert.deepEqual(dotted(added).sort(), [...homes, ...notes('v0.1.1'), ...notes('v0.1.2'), ...notes('v0.1.3')].sort())
+  // Each page of the export names every page of its language as written.
+  const files = new Map(
+    added.locales.flatMap((locale) => {
+      const hrefs = added.pages.get(locale)!.map((p) => pageHref(added.id, locale, p.route))
+      const body = page(locale, hrefs.map((href) => `<a href="${href}">${href}</a>`).join(''))
+      return hrefs.map((href) => [pageFile(href), Buffer.from(body)] as const)
+    }),
+  )
+  assert.equal(files.size, added.locales.length * added.pages.get('en')!.length)
+  assert.deepEqual(await checkExport(files, []), [])
+})
 // What vercel.json's redirects lead to, in both languages.
 const LED_TO = Object.fromEntries(
   ['en', 'zh-CN'].flatMap((l) => [

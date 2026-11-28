@@ -1,4 +1,5 @@
-// Resolve every configured version to one commit and extract it under .cache/snapshots/<sha>.
+// Resolve every configured version to one commit, extract it under .cache/snapshots/<sha> and
+// run the main repository's documentation check on it (lib/sources.ts checkSnapshot).
 //
 // ALPHAAVATAR_SOURCE selects the repository: a local clone (read as it is, nothing fetched) or
 // a git URL. Unset, the GitHub repository in site.config.ts is fetched into .cache/repo.git.
@@ -7,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { site } from '../site.config'
-import { CACHE, SOURCES_FILE, type Snapshot } from '../lib/sources'
+import { CACHE, checkSnapshot, SOURCES_FILE, type Snapshot } from '../lib/sources'
 
 const git = (args: string[], cwd: string) =>
   execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 1 << 30 }).trim()
@@ -52,6 +53,7 @@ const versions: Snapshot[] = site.versions.map((version) => {
   if (!existsSync(path.join(root, 'docs/manifest.yaml'))) {
     throw new Error(`${version.ref} (${sha.slice(0, 8)}) has no docs/manifest.yaml; it cannot be published`)
   }
+  checkSnapshot(root, `${version.ref} (${sha.slice(0, 8)})`)
   const committed = git(['show', '-s', '--format=%cI', sha], repo)
   return { ...version, sha, committed, root }
 })

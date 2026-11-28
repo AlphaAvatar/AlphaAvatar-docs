@@ -9,8 +9,9 @@
 //                                       wait until build.json at the site says this repository's
 //                                       commit SITE or a later one, and for REF the main
 //                                       repository's commit CONTENT or a later one; write it to
-//                                       FILE. Fail on a production deployment Vercel reports
-//                                       failed since SINCE, or after WAIT_MINUTES (30).
+//                                       FILE. Fail after WAIT_MINUTES (30), saying which production
+//                                       deployments Vercel reported failed meanwhile.
+//   tsx scripts/publish.ts checkout SHA this checkout moved to commit SHA, fetched first
 //   tsx scripts/publish.ts pin FILE DIR a repository at DIR whose refs are the commits FILE names,
 //                                       to build out/ from exactly them (ALPHAAVATAR_SOURCE=DIR)
 
@@ -63,21 +64,29 @@ async function reaches(api: ReturnType<typeof github>, repository: string, wante
   return status === 'ahead' || status === 'identical'
 }
 
-// A production deployment Vercel reports failed since `since` (cancelled ones are superseded).
-async function failed(api: ReturnType<typeof github>, since: string) {
+// The production deployments Vercel reports failed (not cancelled) since `since`, or of the site
+// commit wanted, which can have been built before the wait began. None of them can be told for
+// the build this run waits for: GitHub's record of a deployment names its commit, not what
+// started it (a Deploy Hook request, a push, an earlier run), and the same commit is built again
+// by each request. So they are said, as what may explain a build that never comes, and what the
+// site serves and the time limit decide.
+async function failures(api: ReturnType<typeof github>, want: { site: string; since: string }) {
   const deployments = await api<{ sha: string; created_at: string; statuses_url: string }[]>(`repos/${SITE_REPOSITORY}/deployments?environment=Production&per_page=10`)
-  for (const d of deployments.filter((d) => Date.parse(d.created_at) >= Date.parse(since) - 1000)) {
+  const found: string[] = []
+  for (const d of deployments.filter((d) => d.sha === want.site || Date.parse(d.created_at) >= Date.parse(want.since) - 1000)) {
     const [last] = await api<{ state: string; description?: string; log_url?: string; target_url?: string }[]>(d.statuses_url.replace('https://api.github.com/', ''))
     if (last && (last.state === 'failure' || last.state === 'error') && !/cancel/i.test(last.description ?? '')) {
-      return `Vercel reports the production deployment of ${d.sha.slice(0, 7)} ${last.state}: ${last.description ?? 'no description'} (${last.log_url || last.target_url || DEPLOYMENTS})`
+      found.push(`production deployment of ${d.sha.slice(0, 7)} created ${d.created_at}: ${last.state}, ${last.description ?? 'no description'} (${last.log_url || last.target_url || DEPLOYMENTS})`)
     }
   }
+  return found
 }
 
 export async function wait(want: { site: string; ref: string; content: string; since: string }, { fetch, sleep, now, say }: Io = io, minutes = Number(process.env.WAIT_MINUTES || 30)) {
   const api = github(fetch)
   const until = now() + minutes * 60_000
   let seen = ''
+  const noted = new Set<string>()
   for (;;) {
     const response = await fetch(`${site.url}/build.json?at=${now()}`, { cache: 'no-store' }).catch(() => undefined)
     const live = response?.ok ? ((await response.json()) as Build) : undefined
@@ -88,11 +97,34 @@ export async function wait(want: { site: string; ref: string; content: string; s
       say(`Deployed: ${site.url} serves this repository at \`${live.site}\` and ${want.ref} at \`${content}\`, which includes \`${want.content}\`.`)
       return live
     }
-    const failure = await failed(api, want.since)
-    if (failure) throw new Error(`${failure}; the site still serves ${serving}`)
-    if (now() >= until) throw new Error(`after ${minutes} minutes ${site.url} still serves ${serving}, not ${want.ref} ${want.content.slice(0, 7)} or later from site ${want.site.slice(0, 7)} or later: the build failed, was cancelled or is still queued (${DEPLOYMENTS})`)
+    for (const failure of await failures(api, want)) {
+      if (noted.has(failure)) continue
+      noted.add(failure)
+      say(`Vercel reports a failed ${failure}; not necessarily the build waited for, so the wait goes on.`)
+    }
+    if (now() >= until) {
+      const why = noted.size ? `; failed meanwhile: ${[...noted].join('; ')}` : ''
+      throw new Error(`after ${minutes} minutes ${site.url} still serves ${serving}, not ${want.ref} ${want.content.slice(0, 7)} or later from site ${want.site.slice(0, 7)} or later: the build failed, was cancelled or is still queued (${DEPLOYMENTS})${why}`)
+    }
     await sleep(20_000)
   }
+}
+
+// The site can serve a commit of this repository pushed after the checkout at `dir` was made:
+// it is fetched before the checkout moves to it.
+export function checkout(dir: string, sha: string) {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] })
+  const has = () => {
+    try {
+      git('cat-file', '-e', `${sha}^{commit}`)
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (!has()) git('fetch', '--quiet', 'origin')
+  if (!has()) git('fetch', '--quiet', 'origin', sha)
+  git('checkout', '--quiet', '--detach', sha)
 }
 
 export function pin(build: Build, dir: string) {
@@ -114,8 +146,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       const live = await wait({ site: siteCommit, ref, content, since })
       writeFileSync(file, JSON.stringify(live, null, 2) + '\n')
       output('site', live.site!)
-    } else if (command === 'pin') pin(JSON.parse(readFileSync(args[0], 'utf8')) as Build, args[1])
-    else throw new Error('usage: publish.ts trigger | wait SITE REF CONTENT SINCE FILE | pin FILE DIR')
+    } else if (command === 'checkout') checkout(process.cwd(), args[0])
+    else if (command === 'pin') pin(JSON.parse(readFileSync(args[0], 'utf8')) as Build, args[1])
+    else throw new Error('usage: publish.ts trigger | wait SITE REF CONTENT SINCE FILE | checkout SHA | pin FILE DIR')
   } catch (e) {
     console.error(`publish: ${(e as Error).message}`)
     process.exit(1)

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { test } from 'node:test'
 import { site } from '../site.config'
-import { SITE_REPOSITORY, trigger, wait, type Build } from '../scripts/publish'
+import { checkout, SITE_REPOSITORY, trigger, wait, type Build } from '../scripts/publish'
 
 const HOOK = 'https://api.vercel.com/v1/integrations/deploy/prj_synthetic/synthetic-hook-key'
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -67,15 +71,51 @@ test('the wait ends once the site serves the site commit and the content commit 
   assert.equal((await wait(WANT, world([build('s2', 'c2')], HISTORY).io)).site, 's2')
 })
 
-test('the wait fails with what Vercel reports for a production deployment that failed since the trigger, ignoring cancelled and earlier ones', async () => {
+test('a failed deployment that cannot be told for the build waited for is said, not taken for its outcome: the wait goes on until the site serves it', async () => {
   const deployments = [
-    { sha: 's1', created_at: '2026-11-28T11:00:00Z', status: { state: 'failure', description: 'an earlier failure' } },
-    { sha: 's2', created_at: '2026-11-28T12:01:00Z', status: { state: 'error', description: 'Deployment has been canceled' } },
-    { sha: 's2', created_at: '2026-11-28T12:03:00Z', status: { state: 'failure', description: 'Deployment has failed', log_url: 'https://vercel.example/logs/1' } },
+    // Another commit's deployment, failed since the trigger.
+    { sha: 's1', created_at: '2026-11-28T12:01:00Z', status: { state: 'failure', description: 'Deployment has failed', log_url: 'https://vercel.example/logs/1' } },
+    // The wanted commit, built and failed before the wait began (a push's own build).
+    { sha: 's2', created_at: '2026-11-28T11:58:00Z', status: { state: 'error', description: 'Build failed', log_url: 'https://vercel.example/logs/2' } },
+    { sha: 's2', created_at: '2026-11-28T12:02:00Z', status: { state: 'error', description: 'Deployment has been canceled' } },
+    { sha: 's0', created_at: '2026-11-28T11:00:00Z', status: { state: 'failure', description: 'long ago' } },
   ]
-  await assert.rejects(wait(WANT, world([build('s1', 'c1')], HISTORY, deployments).io), /production deployment of s2 failure: Deployment has failed \(https:\/\/vercel\.example\/logs\/1\); the site still serves site s1, dev\/v0\.7\.0 c1/)
-  // Cancelled and earlier failures alone leave it waiting, until the time runs out.
-  await assert.rejects(wait(WANT, world([build('s1', 'c1')], HISTORY, deployments.slice(0, 2)).io, 1), /after 1 minutes .* still serves site s1, dev\/v0\.7\.0 c1, not dev\/v0\.7\.0 c2 or later from site s2 or later/)
+  // The build waited for is still building for three polls, then served.
+  const w = world([build('s1', 'c1'), build('s1', 'c1'), build('s1', 'c1'), build('s2', 'c2')], HISTORY, deployments)
+  assert.equal((await wait(WANT, w.io)).site, 's2')
+  assert.equal(w.polls(), 4)
+  const notes = w.said.filter((l) => l.startsWith('Vercel reports a failed'))
+  assert.deepEqual(notes.map((l) => /deployment of (\w+) created/.exec(l)![1]), ['s1', 's2'])
+  assert.ok(notes.every((l) => l.endsWith('not necessarily the build waited for, so the wait goes on.')))
+  assert.match(w.said.at(-1)!, /^Deployed: /)
+
+  // When it never comes, the time limit ends the wait, naming what failed meanwhile.
+  await assert.rejects(
+    wait(WANT, world([build('s1', 'c1')], HISTORY, deployments).io, 1),
+    /after 1 minutes .* still serves site s1, dev\/v0\.7\.0 c1, not dev\/v0\.7\.0 c2 or later from site s2 or later: .*; failed meanwhile: production deployment of s1 .*logs\/1.*; production deployment of s2 .*logs\/2/,
+  )
+})
+
+// A checkout made at commit A of a repository to which B is pushed afterwards, as Publish's is
+// when the site serves a commit pushed while it waited.
+test('the checkout moves to a commit pushed after it was made, fetching it first', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'publish-checkout-'))
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { cwd, encoding: 'utf8' }).trim()
+  const [remote, writer, site] = ['remote.git', 'writer', 'site'].map((d) => path.join(root, d))
+  git(root, 'init', '--quiet', '--bare', '--initial-branch=main', remote)
+  git(root, 'clone', '--quiet', remote, writer)
+  git(writer, 'commit', '--quiet', '--allow-empty', '-m', 'A')
+  git(writer, 'push', '--quiet', 'origin', 'HEAD:main')
+  git(root, 'clone', '--quiet', remote, site)
+  git(writer, 'commit', '--quiet', '--allow-empty', '-m', 'B')
+  git(writer, 'push', '--quiet', 'origin', 'HEAD:main')
+  const b = git(writer, 'rev-parse', 'HEAD')
+  assert.throws(() => git(site, 'cat-file', '-e', `${b}^{commit}`), 'B is not in the checkout yet')
+  checkout(site, b)
+  assert.equal(git(site, 'rev-parse', 'HEAD'), b)
+  // Already there: nothing to fetch.
+  checkout(site, b)
+  assert.equal(git(site, 'rev-parse', 'HEAD'), b)
 })
 
 test('a site that does not say its own commit is never taken for the one wanted', async () => {

@@ -12,16 +12,20 @@ pnpm build                                  # the static site is written to out/
 ALPHAAVATAR_SOURCE=../AlphaAvatar pnpm dev  # read a local clone instead of GitHub
 ```
 
+The build runs the main repository's documentation check, which needs Python 3 with PyYAML:
+`python3`, or the interpreter `PYTHON` names (for example `PYTHON=../AlphaAvatar/.venv/bin/python`).
+
 | Step | Does | Writes |
 | --- | --- | --- |
-| `pnpm sources` | Resolves each version in `site.config.ts` to one commit and extracts it | `.cache/sources.json`, `.cache/snapshots/<sha>/` |
+| `pnpm sources` | Resolves each version in `site.config.ts` to one commit, extracts it, and runs that snapshot's own `scripts/docs/check_docs.py` on it: a snapshot that fails is not built | `.cache/sources.json`, `.cache/snapshots/<sha>/` |
 | `pnpm generate` | Markdown and HTML sources, repository images, search indexes, `llms.txt`, sitemap, `build.json` | `public/` (ignored) |
 | `pnpm test`, `pnpm typecheck`, `pnpm lint` | The code's checks | — |
 | `next build` | One HTML page per published document, language and version | `out/` |
 | `pnpm check:export` | `out/` as the host serves it: no address served from two different files; every address of the site that a page, Markdown file, index or the sitemap names is served as named, with no redirect; each redirect leads in one step to an address of this site that is served | — |
 
-`pnpm build` runs every step in this order; Vercel runs it too (`vercel.json`), so any failure
-fails the deployment and the site keeps serving the last one that succeeded. `pnpm check:export URL` reads a
+`pnpm build` runs every step in this order; Vercel runs it too (`vercel.json`, after installing
+PyYAML), so any failure fails the deployment and the site keeps serving the last one that
+succeeded. `pnpm check:export URL` reads a
 deployment of what `out/` was built from (a protected one with `VERCEL_AUTOMATION_BYPASS_SECRET`
 set): each address answers 200 with what `out/` holds for it, and its old form with a slash leads
 there; every address it names answers 200; a missing page answers 404; each redirect leads as
@@ -43,14 +47,19 @@ repository links, `search.json` and `llms.txt`.
   what the site reads (`docs/` but `docs/agent-logs/`, any Markdown, HTML or image file) runs its
   **Docs site** workflow, which runs this repository's **Publish** workflow
   (`.github/workflows/publish.yml`, `scripts/publish.ts`):
-  1. checks the main repository's documentation (`scripts/docs/check_docs.py`), and stops there
-     on a problem, before anything is built;
+  1. checks the main repository's documentation (`scripts/docs/check_docs.py`) at the pushed
+     commit, and stops there on a problem;
   2. posts the Vercel Deploy Hook of `main` (secret `DOCS_DEPLOY_HOOK_URL`) and records the job
      Vercel accepted, which is not yet a deployment;
-  3. waits until `build.json` says `main` or a later commit, and the pushed commit or a later one;
-     it fails with what Vercel reports for a failed production deployment, or after 30 minutes;
-  4. builds `out/` from exactly the commits the site serves and runs `pnpm check:export` on the
-     site.
+  3. waits until `build.json` says `main` or a later commit, and the pushed commit or a later one,
+     or fails after 30 minutes. It says which production deployments Vercel reports failed
+     meanwhile, but does not take one for its own: GitHub's record of a deployment names its
+     commit, not what started it;
+  4. fetches and checks out the site commit the site serves, builds `out/` from exactly the
+     commits it serves and runs `pnpm check:export` on the site.
+
+  The build itself checks the commit it actually takes (`pnpm sources`), which can be later
+  than the one pushed: a failing snapshot fails the deployment before anything of it is served.
 
   A push to this repository's `main` is built by Vercel itself; Publish then waits and checks.
 - **Commits triggered and built.** A build takes each ref's latest commit when it starts, so it

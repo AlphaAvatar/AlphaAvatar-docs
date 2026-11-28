@@ -120,7 +120,7 @@ jobs:
         env:
           SITE: ${{ steps.live.outputs.site }}
         run: |
-          git checkout --quiet "$SITE"
+          pnpm exec tsx scripts/publish.ts checkout "$SITE"
           pnpm install --frozen-lockfile
           pnpm exec tsx scripts/publish.ts pin "$RUNNER_TEMP/live.json" "$RUNNER_TEMP/content"
           ALPHAAVATAR_SOURCE="$RUNNER_TEMP/content" pnpm build
