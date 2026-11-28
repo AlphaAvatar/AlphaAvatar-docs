@@ -4,6 +4,7 @@ import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { parseDocument } from 'yaml'
 import { checkSnapshot, snapshots } from '../lib/sources'
 
 // A copy of the snapshot this build reads, under .cache/ of a git repository of its own, as the
@@ -22,14 +23,25 @@ test('the snapshot this build publishes passes its own documentation check', () 
 
 test('a release date that differs from the Roadmap fails the check, and with it the build', () => {
   const root = copy()
-  const manifest = path.join(root, 'docs/manifest.yaml')
-  const text = readFileSync(manifest, 'utf8')
-  // The latest release notes, in both languages, so that only the Roadmap disagrees.
-  const [release, , date] = /release: \{tag: (v[\d.]+), published: (\d{4}-\d{2}-\d{2})\}/.exec(text)!
-  writeFileSync(manifest, text.replaceAll(release, release.replace(date, '2020-01-01')))
+  const file = path.join(root, 'docs/manifest.yaml')
+  const manifest = parseDocument(readFileSync(file, 'utf8'))
+  // One version's release notes, in every language, read and changed as YAML: only the Roadmap
+  // disagrees, however the manifest is written.
+  const documents = (manifest.toJS() as { documents: { type: string; applies_to: string; release?: { published: unknown } }[] }).documents
+  const first = documents.find((d) => d.type === 'release' && d.release)!
+  const date = String(first.release!.published)
+  documents.forEach((d, i) => d.type === 'release' && d.applies_to === first.applies_to && manifest.setIn(['documents', i, 'release', 'published'], '2020-01-01'))
+  writeFileSync(file, manifest.toString({ lineWidth: 0 }))
   assert.throws(
     () => checkSnapshot(root, 'copy'),
-    (e: Error) => e.message.startsWith('copy fails its documentation check') && e.message.includes(`released ${date}`) && e.message.includes(' 2020-01-01'),
+    (e: Error) => {
+      const problems = e.message.split('\n').slice(1).filter((line) => !line.startsWith('docs: '))
+      return (
+        e.message.startsWith('copy fails its documentation check') &&
+        problems.length > 0 &&
+        problems.every((line) => line.includes(`Timeline ${first.applies_to}: released ${date}, `) && line.endsWith(' 2020-01-01'))
+      )
+    },
   )
 })
 
